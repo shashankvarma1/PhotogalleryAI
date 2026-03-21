@@ -1,4 +1,3 @@
-// auth.js
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
@@ -22,15 +21,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           [credentials.username]
         );
 
-        // if (credentials.username === "admin" && credentials.password === "password") {
-        //   return {
-        //     id: 0,
-        //     name: "Admin",
-        //     username: "admin",
-        //     role: "admin",
-        //   };
-        // }
-        
         try {
           const result = await pool.query(
             "SELECT * FROM users WHERE username = $1",
