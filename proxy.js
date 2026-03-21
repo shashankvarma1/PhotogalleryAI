@@ -9,6 +9,7 @@ export default function proxy(req) {
 
   if (isStatic || isApiAuth) return NextResponse.next();
 
+  // Check for session token (NextAuth v5 uses this cookie name)
   const token = req.cookies.get('authjs.session-token') ?? 
                 req.cookies.get('__Secure-authjs.session-token');
 
