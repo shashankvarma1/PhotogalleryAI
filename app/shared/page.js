@@ -22,24 +22,26 @@ export default function SharedWithMe() {
   };
 
   const tabStyle = (tab) => ({
-    padding: '0.65rem 1.5rem',
-    border: 'none',
-    borderRadius: '8px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    fontSize: '0.95rem',
-    backgroundColor: activeTab === tab ? '#2563eb' : '#f1f5f9',
-    color: activeTab === tab ? 'white' : '#374151',
-    transition: 'all 0.2s',
-  });
+  padding: '10px 22px',
+  border: `1.5px solid ${activeTab === tab ? '#111' : 'rgba(17,17,17,0.12)'}`,
+  borderRadius: '100px',
+  fontFamily: "'Syne', sans-serif",
+  fontWeight: '700',
+  fontSize: '12px',
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  cursor: 'pointer',
+  backgroundColor: activeTab === tab ? '#111' : 'rgba(17,17,17,0.04)',
+  color: activeTab === tab ? '#f2efe9' : 'rgba(17,17,17,0.5)',
+  transition: 'all 0.18s',
+});
 
   return (
     <>
       <Header />
       <Sidebar />
-      <main style={{ marginLeft: '240px', marginTop: '64px', padding: '2.5rem 2rem', minHeight: 'calc(100vh - 64px)', backgroundColor: '#f8fafc' }}>
-
-        <h1 style={{ fontSize: '2rem', fontWeight: '700', color: '#111827', marginBottom: '0.5rem' }}>Shared With Me</h1>
+      <main style={{ marginLeft: '240px', marginTop: '62px', padding: '40px 36px', minHeight: 'calc(100vh - 62px)', background: '#f2efe9' }}>
+      <h1 style={{ fontFamily: "'Instrument Serif', serif", fontSize: 'clamp(28px, 3.5vw, 44px)', fontWeight: 400, fontStyle: 'italic', color: '#111', letterSpacing: '-0.02em', marginBottom: 10 }}>Shared Memories</h1>
         <p style={{ color: '#6b7280', marginBottom: '2rem' }}>Photos and albums others have shared with you</p>
 
         {/* Tabs */}
@@ -84,11 +86,11 @@ export default function SharedWithMe() {
               {albums.map((album) => (
                 <div key={album.id}
                   onClick={() => router.push(`/albums/${album.id}`)}
-                  style={{ backgroundColor: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.07)', cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                  style={{ background: '#faf8f4', border: '1px solid rgba(17,17,17,0.07)', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 4px 6px rgba(0,0,0,0.07)', cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
                   onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 12px 20px rgba(0,0,0,0.1)'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.07)'; }}
                 >
-                  <div style={{ height: '160px', backgroundColor: '#f1f5f9', overflow: 'hidden' }}>
+                  <div style={{ height: '160px', background: 'rgba(17,17,17,0.06)', overflow: 'hidden' }}>
                     {album.cover_url
                       ? <img src={album.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       : <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '3rem' }}>🖼️</div>
@@ -115,8 +117,8 @@ export default function SharedWithMe() {
 
       {/* Lightbox */}
       {selectedPhoto && (
-        <div onClick={() => setSelectedPhoto(null)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', maxWidth: '95vw', maxHeight: '90vh', backgroundColor: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.4)' }}>
+        <div onClick={() => setSelectedPhoto(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(10,8,6,0.92)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', maxWidth: '95vw', maxHeight: '90vh',background: '#faf8f4', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.4)' }}>
             <img src={selectedPhoto.url} alt="" style={{ maxWidth: '100%', maxHeight: '85vh', objectFit: 'contain' }} />
             <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid #e5e7eb', fontSize: '0.9rem', color: '#6b7280' }}>
               Shared by @{selectedPhoto.shared_by}

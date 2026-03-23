@@ -164,6 +164,15 @@ export default function Search() {
               onKeyDown={handleKey}
               placeholder="Show me photos from my birthday 2024…"
             />
+            {query && !loading && (
+              <button
+              onClick={() => { setQuery(''); setResults(null); inputRef.current?.focus(); }}
+              style={{ position:'absolute', right:100, top:'50%', transform:'translateY(-50%)', background:'rgba(17,17,17,0.08)', border:'none', width:28, height:28, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer', color:'rgba(17,17,17,0.4)', fontSize:14, fontFamily:"'Syne',sans-serif", transition:'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background='rgba(17,17,17,0.15)'; e.currentTarget.style.color='#111'; }}
+              onMouseLeave={e => { e.currentTarget.style.background='rgba(17,17,17,0.08)'; e.currentTarget.style.color='rgba(17,17,17,0.4)'; }}
+              title="Clear search"
+              >✕</button>
+              )}
             <button className="search-btn" onClick={() => search()} disabled={loading || !query.trim()}>
               {loading ? '…' : 'Search'}
             </button>
@@ -249,9 +258,9 @@ export default function Search() {
             {results.photos?.length > 0 && (
               <div style={{ marginTop:32, textAlign:'center' }}>
                 <button style={{ padding:'10px 24px', background:'rgba(17,17,17,0.06)', color:'rgba(17,17,17,0.6)', border:'1.5px solid rgba(17,17,17,0.1)', borderRadius:100, fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'0.04em' }}
-                  onClick={() => { setQuery(''); setResults(null); inputRef.current?.focus(); }}>
-                  ← New search
-                </button>
+                onClick={() => { setQuery(''); setResults(null); inputRef.current?.focus(); }}>
+                   ← Clear & new search
+              </button>
               </div>
             )}
           </div>

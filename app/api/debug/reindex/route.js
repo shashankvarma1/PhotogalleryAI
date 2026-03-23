@@ -1,52 +1,13 @@
-// app/api/debug/reindex/route.js
-// Re-indexes existing photos: BLIP caption + HF embedding
-// Run once after setup: GET /api/debug/reindex?limit=50
+// app/api/debug/reindex/route.js — uses shared modules, no inline duplicates
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import supabaseAdmin from "@/lib/supabaseAdmin";
 import { captionImage, embedText, toSqlVector } from "@/lib/hf";
+import { buildDescription } from "@/lib/description";
 
-async function captionWithBLIP(imageBuffer) {
-  const res = await fetch(
-    "https://router.huggingface.co/hf-inference/models/Salesforce/blip-image-captioning-large",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.HUGGINGFACE_API_KEY}`,
-        "Content-Type": "application/octet-stream",
-      },
-      body: imageBuffer,
-    }
-  );
-  if (!res.ok) throw new Error(`BLIP ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  return (Array.isArray(data) ? data[0]?.generated_text : data?.generated_text) || null;
-}
-
-function buildDescription(caption, photo) {
-  const parts = [];
-  if (caption) {
-    parts.push(caption + ".");
-  } else {
-    const cleaned = photo.filename.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
-    parts.push(`Photo: ${cleaned}.`);
-  }
-  if (photo.date_taken) {
-    parts.push(`Taken on ${new Date(photo.date_taken).toLocaleDateString("en-US", {
-      year: "numeric", month: "long", day: "numeric"
-    })}.`);
-  }
-  if (photo.camera_make) {
-    parts.push(`Shot on ${photo.camera_make}${photo.camera_model ? " " + photo.camera_model : ""}.`);
-  }
-  if (photo.face_count > 0) {
-    const emotionText = photo.dominant_emotion && photo.dominant_emotion !== "neutral"
-      ? `, appearing ${photo.dominant_emotion}` : "";
-    parts.push(`${photo.face_count === 1 ? "One person" : `${photo.face_count} people`} visible${emotionText}.`);
-  }
-  return parts.join(" ");
-}
+// ── DELETED: inline captionWithBLIP — now uses captionImage from lib/hf.js
+// ── DELETED: inline buildDescription — now imported from lib/description.js
 
 export async function GET(req) {
   try {
@@ -64,9 +25,7 @@ export async function GET(req) {
     const photos = await pool.query(
       `SELECT id, filename, storage_path, camera_make, camera_model,
               date_taken, face_count, dominant_emotion
-       FROM photos
-       ${whereClause}
-       ORDER BY uploaded_at DESC LIMIT $2`,
+       FROM photos ${whereClause} ORDER BY uploaded_at DESC LIMIT $2`,
       [session.user.username, limit]
     );
 
@@ -81,20 +40,34 @@ export async function GET(req) {
       try {
         if (!photo.storage_path) { entry.status = "no_storage_path"; results.push(entry); continue; }
 
-        // Download from Supabase
         const { data: fileData, error: dlErr } = await supabaseAdmin.storage
           .from("photos").download(photo.storage_path);
         if (dlErr || !fileData) { entry.status = "download_error"; entry.error = dlErr?.message; results.push(entry); continue; }
 
         const imageBuffer = Buffer.from(await fileData.arrayBuffer());
 
-        const caption = await captionWithBLIP(imageBuffer);
-        const description = buildDescription(caption, photo);
-        const embedding = await getEmbedding(description);
+        let caption = null;
+        try {
+          caption = await captionImage(imageBuffer); // FIX: uses lib/hf.js with retry
+        } catch (err) {
+          console.error(`BLIP failed for photo ${photo.id}:`, err.message);
+        }
+
+        // FIX: uses shared buildDescription with same signature as upload route
+        const description = buildDescription({
+          caption,
+          filename: photo.filename,
+          exif: { DateTimeOriginal: photo.date_taken, Make: photo.camera_make, Model: photo.camera_model },
+          faceCount: photo.face_count || 0,
+          emotion: photo.dominant_emotion,
+          peopleNames: [],
+        });
+
+        const embedding = await embedText(description); // FIX: was getEmbedding
 
         await pool.query(
           "UPDATE photos SET ai_description = $1, embedding = $2::vector WHERE id = $3",
-          [description, embeddingToSql(embedding), photo.id]
+          [description, toSqlVector(embedding), photo.id] // FIX: was embeddingToSql
         );
 
         entry.status = "indexed";

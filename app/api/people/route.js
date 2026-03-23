@@ -14,7 +14,11 @@ export async function GET() {
       `SELECT p.id, p.name, p.cover_photo_url, p.created_at,
               COUNT(pp.photo_id)::int AS photo_count
        FROM people p
-       LEFT JOIN photo_people pp ON pp.person_id = p.id
+       LEFT JOIN (
+     SELECT person_id, photo_id FROM photo_people
+     UNION
+     SELECT person_id, photo_id FROM face_tags
+   ) pp ON pp.person_id = p.id
        WHERE p.username = $1
        GROUP BY p.id
        ORDER BY p.name ASC`,

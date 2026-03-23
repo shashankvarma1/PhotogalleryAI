@@ -105,25 +105,23 @@ export default function Gallery() {
       <Header />
       <Sidebar />
       <BottomNav />
-      <main style={{ marginLeft:'0', marginTop:'64px', padding:'1.5rem', paddingBottom:'90px', minHeight:'calc(100vh - 64px - 90px)', backgroundColor:'#f8fafc', transition:'margin-left 0.3s' }} className="lg:ml-[240px] lg:p-10 lg:pb-10">
-
+      <main style={{ marginLeft:'240px', marginTop:'62px', padding:'40px 36px', minHeight:'calc(100vh - 62px)', background:'#f2efe9' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'2rem', flexWrap:'wrap', gap:'1rem' }}>
-          <h1 style={{ fontSize:'2rem', fontWeight:700, margin:0, color:'#111827' }}>Your Gallery</h1>
-          <div style={{ display:'flex', gap:'0.75rem', alignItems:'center', flexWrap:'wrap' }}>
+          <h1 style={{ fontFamily:"'Instrument Serif',serif", fontSize:'clamp(26px,3.5vw,40px)', fontWeight:400, fontStyle:'italic', color:'#111', letterSpacing:'-0.02em', margin:0 }}>Your Gallery</h1>          <div style={{ display:'flex', gap:'0.75rem', alignItems:'center', flexWrap:'wrap' }}>
             {photos.length > 0 && (
               <button onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
-                style={{ padding:'0.8rem 1.25rem', backgroundColor: selectMode ? '#f3f4f6' : 'white', color:'#374151', border:'1px solid #d1d5db', borderRadius:'8px', fontWeight:600, cursor:'pointer' }}>
+                style={{ padding:'10px 22px', background: selectMode ? 'rgba(17,17,17,0.08)' : 'rgba(17,17,17,0.04)', color:'#111', border:'1.5px solid rgba(17,17,17,0.12)', borderRadius:100, fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase', cursor:'pointer' }}>
                 {selectMode ? 'Cancel' : 'Select'}
               </button>
             )}
             {selectMode && selectedIds.size > 0 && (
               <button onClick={() => handleDelete([...selectedIds])} disabled={deleting}
-                style={{ padding:'0.8rem 1.25rem', backgroundColor: deleting ? '#9ca3af' : '#dc2626', color:'white', border:'none', borderRadius:'8px', fontWeight:600, cursor: deleting ? 'not-allowed' : 'pointer' }}>
+                style={{ padding:'10px 22px', background: deleting ? 'rgba(17,17,17,0.2)' : 'rgba(220,38,38,0.08)', color:'#c0392b', border:'1.5px solid rgba(220,38,38,0.18)', borderRadius:100, fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase', cursor: deleting ? 'not-allowed' : 'pointer' }}>
                 {deleting ? 'Deleting…' : `Delete (${selectedIds.size})`}
               </button>
             )}
             {!selectMode && (
-              <label style={{ display:'inline-flex', alignItems:'center', gap:'0.5rem', padding:'0.8rem 1.5rem', backgroundColor: uploading ? '#9ca3af' : '#2563eb', color:'white', borderRadius:'8px', fontWeight:600, cursor: uploading || !modelsLoaded ? 'not-allowed' : 'pointer' }}>
+              <label style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'11px 22px', background: uploading ? 'rgba(17,17,17,0.2)' : '#111', color:'#f2efe9', borderRadius:100, fontFamily:"'Syne',sans-serif", fontSize:12, fontWeight:700, letterSpacing:'0.05em', textTransform:'uppercase', cursor: uploading || !modelsLoaded ? 'not-allowed' : 'pointer' }}>
                 {uploading ? uploadStatus || 'Uploading…' : modelsLoaded ? 'Upload Photos' : 'Loading AI…'}
                 <input type="file" accept="image/*" multiple onChange={handleFileChange} disabled={uploading || !modelsLoaded} style={{ display:'none' }} />
               </label>
@@ -132,7 +130,7 @@ export default function Gallery() {
         </div>
 
         {uploadStatus && !uploading && (
-          <div style={{ marginBottom:'1.5rem', padding:'0.75rem 1rem', backgroundColor: uploadStatus.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border:`1px solid ${uploadStatus.startsWith('✓') ? '#bbf7d0' : '#fecaca'}`, borderRadius:'8px', color: uploadStatus.startsWith('✓') ? '#166534' : '#dc2626', fontWeight:600 }}>
+          <div style={{ marginBottom:'1.5rem', padding:'0.75rem 1rem', background: uploadStatus.startsWith('✓') ? 'rgba(45,138,94,0.08)' : 'rgba(220,38,38,0.06)', border:`1.5px solid ${uploadStatus.startsWith('✓') ? 'rgba(45,138,94,0.2)' : 'rgba(220,38,38,0.18)'}`, borderRadius:12, color: uploadStatus.startsWith('✓') ? '#2d8a5e' : '#c0392b', fontFamily:"'Syne',sans-serif", fontSize:13, fontWeight:600 }}>
             {uploadStatus}
           </div>
         )}
@@ -142,12 +140,12 @@ export default function Gallery() {
             {photos.map(photo => (
               <div key={photo.id}
                 onClick={() => { if (selectMode) toggleSelect(photo.id); else { setSelected(photo); setShareMsg(''); setShareUser(''); } }}
-                style={{ aspectRatio:'1/1', borderRadius:'10px', overflow:'hidden', cursor:'pointer', boxShadow: selectedIds.has(photo.id) ? '0 0 0 3px #2563eb' : '0 4px 10px rgba(0,0,0,0.1)', transition:'transform 0.2s,box-shadow 0.2s', position:'relative', opacity: selectedIds.has(photo.id) ? 0.85 : 1 }}
+                style={{ aspectRatio:'1/1', borderRadius:14, overflow:'hidden', cursor:'pointer', boxShadow: selectedIds.has(photo.id) ? '0 0 0 3px #111' : '0 4px 16px rgba(0,0,0,0.07)', transition:'transform 0.22s cubic-bezier(0.22,1,0.36,1), box-shadow 0.22s', position:'relative', opacity: selectedIds.has(photo.id) ? 0.85 : 1, background:'rgba(17,17,17,0.04)' }}
                 onMouseEnter={e => { if (!selectMode) e.currentTarget.style.transform = 'scale(1.05)'; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}>
                 <img src={photo.url} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                 {selectMode && (
-                  <div style={{ position:'absolute', top:'0.5rem', left:'0.5rem', width:22, height:22, borderRadius:'50%', backgroundColor: selectedIds.has(photo.id) ? '#2563eb' : 'rgba(255,255,255,0.8)', border:'2px solid white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                  <div style={{ position:'absolute', top:'0.5rem', left:'0.5rem', width:22, height:22, borderRadius:'50%', backgroundColor: selectedIds.has(photo.id) ? '#111' : 'rgba(255,255,255,0.8)', border:'2px solid white', display:'flex', alignItems:'center', justifyContent:'center' }}>
                     {selectedIds.has(photo.id) && <span style={{ color:'white', fontSize:13, fontWeight:'bold' }}>✓</span>}
                   </div>
                 )}

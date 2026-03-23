@@ -160,9 +160,13 @@ export default function PeoplePage() {
 
   const filteredGroups = groups.filter(g => {
     if (!searchQuery) return true;
-    // Check if any tagged person name matches
-    return true; // Show all ungrouped; named people filtered separately
+    const q = searchQuery.toLowerCase();
+    return g.photos.some(p =>
+      (p.filename || '').toLowerCase().includes(q) ||
+      (p.url || '').toLowerCase().includes(q)
+    );
   });
+
 
   return (
     <>
