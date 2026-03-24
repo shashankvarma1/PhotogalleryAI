@@ -244,7 +244,7 @@ export async function GET(req) {
     if (photos.length === 0) {
       const lowerWords = query.toLowerCase().split(/\s+/).filter(Boolean);
       const fallbackSql = `
-        SELECT DISTINCT p.*, 0 AS similarity_pct, 0 AS similarity
+        SELECT p.*, 0 AS similarity_pct, 0 AS similarity
         FROM photos p
         ${joinClause}
         WHERE ${whereClause}
