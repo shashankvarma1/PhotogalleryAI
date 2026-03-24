@@ -1,43 +1,52 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as faceapi from 'face-api.js';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import BottomNav from '../../components/BottomNav';
 
+const EMOTION_EMOJI = {
+  happy: '😊', excited: '🎉', surprised: '😮',
+  calm: '😌', neutral: '😐', sad: '😢',
+  fearful: '😨', angry: '😠', disgusted: '🤢',
+};
+
 export default function Gallery() {
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
-  const [photos, setPhotos] = useState([]);
-  const [uploading, setUploading] = useState(false);
-  const [selectMode, setSelectMode] = useState(false);
+  const [photos, setPhotos]           = useState([]);
+  const [selectedPhoto, setSelected]  = useState(null);
+  const [uploading, setUploading]     = useState(false);
+  const [uploadStatus, setStatus]     = useState('');
+  const [selectMode, setSelectMode]   = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
-  const [deleting, setDeleting] = useState(false);
-  const [shareUsername, setShareUsername] = useState('');
-  const [sharing, setSharing] = useState(false);
-  const [shareMsg, setShareMsg] = useState('');
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [personGroups, setPersonGroups] = useState([]);
+  const [deleting, setDeleting]       = useState(false);
+  const [shareUsername, setShareUser] = useState('');
+  const [sharing, setSharing]         = useState(false);
+  const [shareMsg, setShareMsg]       = useState('');
+  const [modelsLoaded, setModels]     = useState(false);
 
+  // Re-analysis state
+  const [reanalyzing, setReanalyzing]             = useState(false);
+  const [reanalyzeMsg, setReanalyzeMsg]           = useState('');
+  const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
+
+  // Location edit state
+  const [editingLocation, setEditingLocation] = useState(null);
+  const [locationInput, setLocationInput]     = useState('');
+  const [savingLocation, setSavingLocation]   = useState(false);
+
+  useEffect(() => { fetchPhotos(); }, []);
+
+  // ── Load ALL four face-api models including faceExpressionNet ─────────────
   useEffect(() => {
-    fetchPhotos();
-  }, []);
-
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-          faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
-        ]);
-        setModelsLoaded(true);
-      } catch (err) {
-        console.error('Failed to load face models:', err);
-      }
-    };
-
-    loadModels();
+    Promise.all([
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+      faceapi.nets.faceExpressionNet.loadFromUri('/models'), // was missing — required for emotion
+    ])
+      .then(() => setModels(true))
+      .catch(() => setModels(true));
   }, []);
 
   const fetchPhotos = async () => {
@@ -46,137 +55,137 @@ export default function Gallery() {
     if (data.photos) setPhotos(data.photos);
   };
 
-  const euclideanDistance = (d1, d2) => {
-    let sum = 0;
-    for (let i = 0; i < d1.length; i++) {
-      const diff = d1[i] - d2[i];
-      sum += diff * diff;
-    }
-    return Math.sqrt(sum);
-  };
+  // ── detectFaces — now reads actual dominant emotion ───────────────────────
+  const detectFaces = async (file) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.src = url;
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
 
-  const groupFaces = (results, threshold = 0.6) => {
-    const groups = [];
+      const detections = await faceapi
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceExpressions()   // was missing before
+        .withFaceDescriptors();
 
-    for (const item of results) {
-      let matchedGroup = null;
-      let bestDistance = Infinity;
+      URL.revokeObjectURL(url);
 
-      for (const group of groups) {
-        const dist = euclideanDistance(item.descriptor, group.representativeDescriptor);
-        if (dist < threshold && dist < bestDistance) {
-          bestDistance = dist;
-          matchedGroup = group;
-        }
+      if (!detections.length) {
+        return { name: file.name, faceCount: 0, dominantEmotion: null, descriptor: null };
       }
 
-      if (matchedGroup) {
-        matchedGroup.photos.push({
-          name: item.name,
-          previewUrl: item.previewUrl,
-          faceCount: item.faceCount,
-        });
-      } else {
-        groups.push({
-          label: `Person ${groups.length + 1}`,
-          representativeDescriptor: item.descriptor,
-          photos: [
-            {
-              name: item.name,
-              previewUrl: item.previewUrl,
-              faceCount: item.faceCount,
-            },
-          ],
-        });
-      }
-    }
+      const main = detections.reduce((a, b) =>
+        b.detection.box.width * b.detection.box.height >
+        a.detection.box.width * a.detection.box.height ? b : a
+      );
 
-    return groups;
-  };
+      // Read actual dominant emotion — was hardcoded null before
+      const dominantEmotion = Object.entries(main.expressions)
+        .sort(([, a], [, b]) => b - a)[0][0];
 
-  const extractFaceData = async (file) => {
-    const objectUrl = URL.createObjectURL(file);
-    const img = new Image();
-    img.src = objectUrl;
-
-    await new Promise((resolve, reject) => {
-      img.onload = resolve;
-      img.onerror = reject;
-    });
-
-    const detections = await faceapi
-      .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
-      .withFaceLandmarks()
-      .withFaceDescriptors();
-
-    if (!detections.length) {
       return {
         name: file.name,
-        previewUrl: objectUrl,
-        descriptor: null,
-        faceCount: 0,
+        faceCount: detections.length,
+        descriptor: Array.from(main.descriptor),
+        dominantEmotion,
       };
+    } catch {
+      return { name: file.name, faceCount: 0, dominantEmotion: null, descriptor: null };
+    }
+  };
+
+  // ── detectFacesFromUrl — for re-analysing existing photos ─────────────────
+  const detectFacesFromUrl = async (photoId, url) => {
+    try {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = url;
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+
+      const detections = await faceapi
+        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceExpressions()
+        .withFaceDescriptors();
+
+      if (!detections.length) return { photoId, faceCount: 0, dominantEmotion: null };
+
+      const main = detections.reduce((a, b) =>
+        b.detection.box.width * b.detection.box.height >
+        a.detection.box.width * a.detection.box.height ? b : a
+      );
+
+      const dominantEmotion = Object.entries(main.expressions)
+        .sort(([, a], [, b]) => b - a)[0][0];
+
+      return { photoId, faceCount: detections.length, dominantEmotion };
+    } catch {
+      return { photoId, faceCount: 0, dominantEmotion: null };
+    }
+  };
+
+  // ── Re-analyse all photos for emotion data ────────────────────────────────
+  const handleReanalyze = async () => {
+    if (!modelsLoaded || !photos.length) return;
+    setReanalyzing(true);
+    setReanalyzeMsg('');
+    setReanalyzeProgress({ done: 0, total: photos.length });
+
+    const BATCH = 10;
+    let totalUpdated = 0;
+
+    for (let i = 0; i < photos.length; i += BATCH) {
+      const batch = photos.slice(i, i + BATCH);
+      const results = await Promise.all(batch.map(p => detectFacesFromUrl(p.id, p.url)));
+
+      try {
+        const res = await fetch('/api/photos/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ results }),
+        });
+        const data = await res.json();
+        totalUpdated += data.updated ?? 0;
+      } catch (err) {
+        console.error('Batch analyze failed:', err);
+      }
+
+      setReanalyzeProgress({ done: Math.min(i + BATCH, photos.length), total: photos.length });
     }
 
-    const mainFace = detections.reduce((largest, current) => {
-      const largestBox = largest.detection.box;
-      const currentBox = current.detection.box;
-      const largestArea = largestBox.width * largestBox.height;
-      const currentArea = currentBox.width * currentBox.height;
-      return currentArea > largestArea ? current : largest;
-    });
-
-    return {
-      name: file.name,
-      previewUrl: objectUrl,
-      descriptor: Array.from(mainFace.descriptor),
-      faceCount: detections.length,
-    };
+    await fetchPhotos();
+    setReanalyzing(false);
+    setReanalyzeProgress(null);
+    setReanalyzeMsg(`✓ Done — updated ${totalUpdated} photo${totalUpdated !== 1 ? 's' : ''} with emotion data`);
+    setTimeout(() => setReanalyzeMsg(''), 6000);
   };
 
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-
-    if (!modelsLoaded) {
-      alert('AI models are still loading. Try again in a second.');
-      return;
-    }
-
     setUploading(true);
-
+    setStatus(`Analysing ${files.length} photo${files.length > 1 ? 's' : ''}…`);
     try {
+      const faceResults = await Promise.all(files.map(detectFaces));
       const formData = new FormData();
-      const faceResults = [];
-
-      for (const file of files) {
-        const result = await extractFaceData(file);
-        faceResults.push(result);
-        formData.append('photos', file);
-      }
-
-      const validFaceResults = faceResults.filter((r) => r.descriptor);
-      const grouped = groupFaces(validFaceResults, 0.6);
-      setPersonGroups(grouped);
-
-      const res = await fetch('/api/photos/upload', {
-        method: 'POST',
-        body: formData,
-      });
-
+      files.forEach(f => formData.append('photos', f));
+      formData.append('faceResults', JSON.stringify(faceResults));
+      setStatus('Uploading & generating AI captions…');
+      const res = await fetch('/api/photos/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.photos) await fetchPhotos();
-    } catch (err) {
-      console.error('Face grouping/upload error:', err);
-      alert('Something went wrong during face grouping or upload.');
+      if (data.photos) {
+        await fetchPhotos();
+        setStatus(`✓ ${data.photos.length} photo${data.photos.length > 1 ? 's' : ''} uploaded`);
+        setTimeout(() => setStatus(''), 4000);
+      } else {
+        setStatus('Upload failed');
+      }
+    } catch {
+      setStatus('Something went wrong');
     }
-
     setUploading(false);
-  };
-
-  const toggleSelectMode = () => {
-    setSelectMode(!selectMode);
-    setSelectedIds(new Set());
+    e.target.value = '';
   };
 
   const toggleSelect = (id) => {
@@ -185,24 +194,19 @@ export default function Gallery() {
     setSelectedIds(s);
   };
 
-  const selectAll = () => {
-    if (selectedIds.size === photos.length) setSelectedIds(new Set());
-    else setSelectedIds(new Set(photos.map((p) => p.id)));
-  };
-
-  const handleDelete = async (idsToDelete) => {
-    if (!confirm(`Delete ${idsToDelete.length} photo${idsToDelete.length > 1 ? 's' : ''}?`)) return;
+  const handleDelete = async (ids) => {
+    if (!confirm(`Delete ${ids.length} photo${ids.length > 1 ? 's' : ''}?`)) return;
     setDeleting(true);
     const res = await fetch('/api/photos/delete', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ photoIds: idsToDelete }),
+      body: JSON.stringify({ photoIds: ids }),
     });
     if (res.ok) {
       await fetchPhotos();
       setSelectedIds(new Set());
       setSelectMode(false);
-      setSelectedPhoto(null);
+      setSelected(null);
     }
     setDeleting(false);
   };
@@ -217,13 +221,48 @@ export default function Gallery() {
       body: JSON.stringify({ photoId: selectedPhoto.id, shareWith: shareUsername.trim() }),
     });
     const data = await res.json();
-    if (res.ok) {
-      setShareMsg(`✓ Shared with ${shareUsername}`);
-      setShareUsername('');
-    } else {
-      setShareMsg(`✗ ${data.error}`);
-    }
+    if (res.ok) { setShareMsg(`✓ Shared with ${shareUsername}`); setShareUser(''); }
+    else setShareMsg(`✗ ${data.error}`);
     setSharing(false);
+  };
+
+  // ── Save manual location ──────────────────────────────────────────────────
+  const handleSaveLocation = async () => {
+    if (!locationInput.trim() || !editingLocation) return;
+    setSavingLocation(true);
+    try {
+      await fetch(`/api/photos/${editingLocation}/location`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ placeName: locationInput.trim() }),
+      });
+      // Update selectedPhoto immediately so UI reflects without waiting for fetchPhotos
+      setSelected(prev => prev ? { ...prev, place_name: locationInput.trim() } : prev);
+      await fetchPhotos();
+      setEditingLocation(null);
+      setLocationInput('');
+    } catch (err) {
+      console.error('Save location error:', err);
+    }
+    setSavingLocation(false);
+  };
+
+ const formatDate = (dateStr) => {
+  if (!dateStr) return null;
+  try {
+    return new Date(dateStr).toLocaleDateString(undefined, {
+      year: 'numeric', month: 'long', day: 'numeric',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    });
+  } catch { return null; }
+};
+
+  const closeLightbox = () => {
+    setSelected(null);
+    setEditingLocation(null);
+    setLocationInput('');
+    setShareMsg('');
+    setShareUser('');
   };
 
   return (
@@ -233,250 +272,106 @@ export default function Gallery() {
       <BottomNav />
 
       <main
-        style={{
-          marginLeft: '0',
-          marginTop: '64px',
-          padding: '1.5rem',
-          paddingBottom: '90px',
-          minHeight: 'calc(100vh - 64px - 90px)',
-          backgroundColor: '#f8fafc',
-          transition: 'margin-left 0.3s ease',
-        }}
+        style={{ marginLeft: '0', marginTop: '64px', padding: '1.5rem', paddingBottom: '90px', minHeight: 'calc(100vh - 64px - 90px)', backgroundColor: '#f8fafc', transition: 'margin-left 0.3s' }}
         className="lg:ml-[240px] lg:p-10 lg:pb-10"
       >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '2rem',
-            flexWrap: 'wrap',
-            gap: '1rem',
-          }}
-        >
-          <h1 style={{ fontSize: '2rem', fontWeight: '700', margin: 0, color: '#111827' }}>
-            Your Gallery
-          </h1>
+        {/* ── Header row ───────────────────────────────────────────────── */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', flexWrap: 'wrap', gap: '1rem' }}>
+          <h1 style={{ fontSize: '2rem', fontWeight: 700, margin: 0, color: '#111827' }}>Your Gallery</h1>
 
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+
+            {modelsLoaded && photos.length > 0 && !selectMode && (
+              <button
+                onClick={handleReanalyze}
+                disabled={reanalyzing}
+                style={{ padding: '0.8rem 1.25rem', backgroundColor: reanalyzing ? '#e0e7ff' : '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe', borderRadius: '8px', fontWeight: 600, cursor: reanalyzing ? 'not-allowed' : 'pointer', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              >
+                {reanalyzing ? (
+                  <>
+                    <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
+                    {reanalyzeProgress ? `${reanalyzeProgress.done}/${reanalyzeProgress.total}` : 'Analysing…'}
+                  </>
+                ) : '🔍 Re-analyse Emotions'}
+              </button>
+            )}
+
             {photos.length > 0 && (
               <button
-                onClick={toggleSelectMode}
-                style={{
-                  padding: '0.8rem 1.25rem',
-                  backgroundColor: selectMode ? '#f3f4f6' : 'white',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                }}
+                onClick={() => { setSelectMode(!selectMode); setSelectedIds(new Set()); }}
+                style={{ padding: '0.8rem 1.25rem', backgroundColor: selectMode ? '#f3f4f6' : 'white', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', fontWeight: 600, cursor: 'pointer' }}
               >
                 {selectMode ? 'Cancel' : 'Select'}
               </button>
             )}
 
-            {selectMode && (
-              <>
-                <button
-                  onClick={selectAll}
-                  style={{
-                    padding: '0.8rem 1.25rem',
-                    backgroundColor: 'white',
-                    color: '#374151',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {selectedIds.size === photos.length ? 'Deselect All' : 'Select All'}
-                </button>
-
-                {selectedIds.size > 0 && (
-                  <button
-                    onClick={() => handleDelete([...selectedIds])}
-                    disabled={deleting}
-                    style={{
-                      padding: '0.8rem 1.25rem',
-                      backgroundColor: deleting ? '#9ca3af' : '#dc2626',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '8px',
-                      fontWeight: '600',
-                      cursor: deleting ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {deleting ? 'Deleting...' : `Delete (${selectedIds.size})`}
-                  </button>
-                )}
-              </>
+            {selectMode && selectedIds.size > 0 && (
+              <button
+                onClick={() => handleDelete([...selectedIds])}
+                disabled={deleting}
+                style={{ padding: '0.8rem 1.25rem', backgroundColor: deleting ? '#9ca3af' : '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: deleting ? 'not-allowed' : 'pointer' }}
+              >
+                {deleting ? 'Deleting…' : `Delete (${selectedIds.size})`}
+              </button>
             )}
 
             {!selectMode && (
-              <label
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.8rem 1.5rem',
-                  backgroundColor: uploading ? '#9ca3af' : '#2563eb',
-                  color: 'white',
-                  borderRadius: '8px',
-                  fontWeight: '600',
-                  cursor: uploading || !modelsLoaded ? 'not-allowed' : 'pointer',
-                }}
-              >
-                <span>
-                  {uploading
-                    ? 'Grouping faces + Uploading...'
-                    : modelsLoaded
-                    ? 'Upload Photos'
-                    : 'Loading AI models...'}
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={handleFileChange}
-                  disabled={uploading || !modelsLoaded}
-                  style={{ display: 'none' }}
-                />
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.8rem 1.5rem', backgroundColor: uploading || !modelsLoaded ? '#9ca3af' : '#2563eb', color: 'white', borderRadius: '8px', fontWeight: 600, cursor: uploading || !modelsLoaded ? 'not-allowed' : 'pointer' }}>
+                {uploading ? uploadStatus || 'Uploading…' : modelsLoaded ? 'Upload Photos' : 'Loading AI…'}
+                <input type="file" accept="image/*" multiple onChange={handleFileChange} disabled={uploading || !modelsLoaded} style={{ display: 'none' }} />
               </label>
             )}
           </div>
         </div>
 
-        {personGroups.length > 0 && (
-          <div
-            style={{
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              padding: '1.25rem',
-              marginBottom: '2rem',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            }}
-          >
-            <h2 style={{ marginTop: 0, color: '#111827' }}>Grouped by Person</h2>
-            <div style={{ display: 'grid', gap: '1.5rem' }}>
-              {personGroups.map((group) => (
-                <div key={group.label}>
-                  <h3 style={{ marginBottom: '0.75rem', color: '#2563eb' }}>
-                    {group.label} ({group.photos.length} photo{group.photos.length > 1 ? 's' : ''})
-                  </h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '0.75rem' }}>
-                    {group.photos.map((photo, idx) => (
-                      <div
-                        key={`${group.label}-${idx}`}
-                        style={{
-                          backgroundColor: '#f8fafc',
-                          borderRadius: '10px',
-                          padding: '0.5rem',
-                          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                        }}
-                      >
-                        <img
-                          src={photo.previewUrl}
-                          alt={photo.name}
-                          style={{
-                            width: '100%',
-                            aspectRatio: '1/1',
-                            objectFit: 'cover',
-                            borderRadius: '8px',
-                            marginBottom: '0.5rem',
-                          }}
-                        />
-                        <p style={{ margin: 0, fontSize: '0.8rem', color: '#374151', wordBreak: 'break-word' }}>
-                          {photo.name}
-                        </p>
-                        <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: '#6b7280' }}>
-                          {photo.faceCount} face(s) detected
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+        {/* ── Status banners ──────────────────────────────────────────── */}
+        {uploadStatus && !uploading && (
+          <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', backgroundColor: uploadStatus.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: `1px solid ${uploadStatus.startsWith('✓') ? '#bbf7d0' : '#fecaca'}`, borderRadius: '8px', color: uploadStatus.startsWith('✓') ? '#166534' : '#dc2626', fontWeight: 600 }}>
+            {uploadStatus}
           </div>
         )}
 
-        {photos.length > 0 ? (
-          <div style={{ marginBottom: '3rem' }}>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: '600', color: '#4b5563', marginBottom: '1.25rem' }}>
-              Your Photos ({photos.length})
-              {selectMode && selectedIds.size > 0 && (
-                <span style={{ fontSize: '1rem', color: '#2563eb', marginLeft: '0.75rem' }}>
-                  {selectedIds.size} selected
-                </span>
-              )}
-            </h2>
+        {reanalyzeMsg && (
+          <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', backgroundColor: reanalyzeMsg.startsWith('✓') ? '#f0fdf4' : '#fef3c7', border: `1px solid ${reanalyzeMsg.startsWith('✓') ? '#bbf7d0' : '#fde68a'}`, borderRadius: '8px', color: reanalyzeMsg.startsWith('✓') ? '#166534' : '#92400e', fontWeight: 600 }}>
+            {reanalyzeMsg}
+          </div>
+        )}
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-                gap: '1rem',
-              }}
-            >
-              {photos.map((photo) => (
-                <div
-                  key={photo.id}
-                  onClick={() => {
-                    if (selectMode) toggleSelect(photo.id);
-                    else {
-                      setSelectedPhoto(photo);
-                      setShareMsg('');
-                      setShareUsername('');
-                    }
-                  }}
-                  style={{
-                    aspectRatio: '1/1',
-                    borderRadius: '10px',
-                    overflow: 'hidden',
-                    cursor: 'pointer',
-                    boxShadow: selectedIds.has(photo.id)
-                      ? '0 0 0 3px #2563eb'
-                      : '0 4px 10px rgba(0,0,0,0.1)',
-                    transition: 'transform 0.2s, box-shadow 0.2s',
-                    position: 'relative',
-                    opacity: selectedIds.has(photo.id) ? 0.85 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!selectMode) e.currentTarget.style.transform = 'scale(1.05)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)';
-                  }}
-                >
-                  <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  {selectMode && (
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '0.5rem',
-                        left: '0.5rem',
-                        width: '22px',
-                        height: '22px',
-                        borderRadius: '50%',
-                        backgroundColor: selectedIds.has(photo.id)
-                          ? '#2563eb'
-                          : 'rgba(255,255,255,0.8)',
-                        border: '2px solid white',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                      }}
-                    >
-                      {selectedIds.has(photo.id) && (
-                        <span style={{ color: 'white', fontSize: '13px', fontWeight: 'bold' }}>✓</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+        {/* ── Photo grid ──────────────────────────────────────────────── */}
+        {photos.length > 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '1rem' }}>
+            {photos.map(photo => (
+              <div
+                key={photo.id}
+                onClick={() => {
+                  if (selectMode) toggleSelect(photo.id);
+                  else { setSelected(photo); setShareMsg(''); setShareUser(''); setEditingLocation(null); setLocationInput(''); }
+                }}
+                style={{ aspectRatio: '1/1', borderRadius: '10px', overflow: 'hidden', cursor: 'pointer', boxShadow: selectedIds.has(photo.id) ? '0 0 0 3px #2563eb' : '0 4px 10px rgba(0,0,0,0.1)', transition: 'transform 0.2s, box-shadow 0.2s', position: 'relative', opacity: selectedIds.has(photo.id) ? 0.85 : 1 }}
+                onMouseEnter={e => { if (!selectMode) e.currentTarget.style.transform = 'scale(1.05)'; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
+              >
+                <img src={photo.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+
+                {selectMode && (
+                  <div style={{ position: 'absolute', top: '0.5rem', left: '0.5rem', width: 22, height: 22, borderRadius: '50%', backgroundColor: selectedIds.has(photo.id) ? '#2563eb' : 'rgba(255,255,255,0.8)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {selectedIds.has(photo.id) && <span style={{ color: 'white', fontSize: 13, fontWeight: 'bold' }}>✓</span>}
+                  </div>
+                )}
+
+                {!selectMode && photo.dominant_emotion && photo.dominant_emotion !== 'neutral' && (
+                  <div style={{ position: 'absolute', bottom: '0.4rem', right: '0.4rem', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', borderRadius: '100px', padding: '2px 7px', fontSize: 11, color: 'white', fontWeight: 600 }}>
+                    {EMOTION_EMOJI[photo.dominant_emotion] ?? ''} {photo.dominant_emotion}
+                  </div>
+                )}
+
+                {!selectMode && photo.place_name && (
+                  <div style={{ position: 'absolute', bottom: (photo.dominant_emotion && photo.dominant_emotion !== 'neutral') ? '1.8rem' : '0.4rem', left: '0.4rem', right: '0.4rem', background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', borderRadius: '100px', padding: '2px 7px', fontSize: 10, color: 'white', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    📍 {photo.place_name}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         ) : (
           <div style={{ textAlign: 'center', padding: '6rem 1rem', color: '#6b7280' }}>
@@ -486,139 +381,158 @@ export default function Gallery() {
         )}
       </main>
 
+      {/* ── Lightbox ────────────────────────────────────────────────────── */}
       {selectedPhoto && (
         <div
-          onClick={() => setSelectedPhoto(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(0,0,0,0.9)',
-            zIndex: 2000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem',
-          }}
+          onClick={closeLightbox}
+          style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}
         >
           <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'relative',
-              maxWidth: '95vw',
-              maxHeight: '90vh',
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              overflow: 'hidden',
-              boxShadow: '0 25px 50px rgba(0,0,0,0.4)',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
+            onClick={e => e.stopPropagation()}
+            style={{ position: 'relative', maxWidth: '95vw', maxHeight: '90vh', backgroundColor: 'white', borderRadius: '12px', overflow: 'hidden', boxShadow: '0 25px 50px rgba(0,0,0,0.4)', display: 'flex', flexDirection: 'column' }}
           >
-            <img
-              src={selectedPhoto.url}
-              alt=""
-              style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
-            />
+            {/* Photo */}
+            <img src={selectedPhoto.url} alt="" style={{ maxWidth: '100%', maxHeight: '55vh', objectFit: 'contain' }} />
 
-            <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid #e5e7eb', backgroundColor: 'white' }}>
+            {/* ── Metadata rows ─────────────────────────────────────── */}
+
+            {/* Date row */}
+            {(selectedPhoto.date_taken || selectedPhoto.uploaded_at) && (
+              <div style={{ padding: '6px 16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8f7f4', fontSize: '0.82rem', color: '#6b7280', display: 'flex', alignItems: 'center', gap: 8 }}>
+                🗓 {formatDate(selectedPhoto.date_taken || selectedPhoto.uploaded_at)}
+                {selectedPhoto.date_taken && selectedPhoto.uploaded_at && (
+                  <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                    · uploaded {formatDate(selectedPhoto.uploaded_at)}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* Location row */}
+            <div style={{ padding: '6px 16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f0fdf4', fontSize: '0.82rem', color: '#166534', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              📍{' '}
+              {selectedPhoto.place_name ? (
+                <>
+                  {selectedPhoto.place_name}
+                  <button
+                    onClick={() => { setEditingLocation(selectedPhoto.id); setLocationInput(selectedPhoto.place_name); }}
+                    style={{ marginLeft: 4, background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '0.78rem', padding: 0 }}
+                  >
+                    Edit
+                  </button>
+                </>
+              ) : (
+                <span style={{ color: '#6b7280' }}>
+                  No location —{' '}
+                  <button
+                    onClick={() => setEditingLocation(selectedPhoto.id)}
+                    style={{ background: 'none', border: 'none', color: '#2563eb', cursor: 'pointer', fontWeight: 600, padding: 0, fontSize: '0.82rem' }}
+                  >
+                    Add location
+                  </button>
+                </span>
+              )}
+            </div>
+
+            {/* Location input (inline edit) */}
+            {editingLocation === selectedPhoto.id && (
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f8fafc', display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input
+                  value={locationInput}
+                  onChange={e => setLocationInput(e.target.value)}
+                  placeholder="e.g. New York, USA"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleSaveLocation();
+                    if (e.key === 'Escape') { setEditingLocation(null); setLocationInput(''); }
+                  }}
+                  autoFocus
+                  style={{ flex: 1, padding: '6px 10px', border: '1px solid #d1d5db', borderRadius: 8, fontSize: '0.85rem', outline: 'none' }}
+                />
+                <button
+                  onClick={handleSaveLocation}
+                  disabled={savingLocation || !locationInput.trim()}
+                  style={{ padding: '6px 14px', backgroundColor: savingLocation ? '#9ca3af' : '#2563eb', color: 'white', border: 'none', borderRadius: 8, cursor: savingLocation ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: '0.85rem' }}
+                >
+                  {savingLocation ? '…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => { setEditingLocation(null); setLocationInput(''); }}
+                  style={{ padding: '6px 12px', background: '#f3f4f6', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem' }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {/* Emotion row */}
+            {selectedPhoto.dominant_emotion && (
+              <div style={{ padding: '6px 16px', borderBottom: '1px solid #e0f2fe', backgroundColor: '#f0f9ff', fontSize: '0.82rem', color: '#0369a1', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {EMOTION_EMOJI[selectedPhoto.dominant_emotion] ?? ''} Emotion:{' '}
+                <span style={{ textTransform: 'capitalize' }}>{selectedPhoto.dominant_emotion}</span>
+                {selectedPhoto.face_count > 0 && (
+                  <span style={{ color: '#64748b', fontWeight: 400, marginLeft: 8 }}>
+                    · {selectedPhoto.face_count} face{selectedPhoto.face_count !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* AI description */}
+            {selectedPhoto.ai_description && (
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #e5e7eb', backgroundColor: '#f9fafb', fontSize: '0.82rem', color: '#374151', fontStyle: 'italic', lineHeight: 1.5, maxWidth: 600 }}>
+                {selectedPhoto.ai_description}
+              </div>
+            )}
+
+            {/* ── Actions ─────────────────────────────────────────── */}
+            <div style={{ padding: '1rem 1.25rem', backgroundColor: 'white' }}>
               <div style={{ marginBottom: '0.75rem' }}>
                 <button
                   onClick={() => handleDelete([selectedPhoto.id])}
                   disabled={deleting}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    backgroundColor: '#fee2e2',
-                    color: '#dc2626',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontSize: '0.9rem',
-                  }}
+                  style={{ padding: '0.5rem 1rem', backgroundColor: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' }}
                 >
                   🗑 Delete
                 </button>
               </div>
-
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <input
                   type="text"
                   value={shareUsername}
-                  onChange={(e) => {
-                    setShareUsername(e.target.value);
-                    setShareMsg('');
-                  }}
-                  placeholder="Share with username..."
-                  style={{
-                    flex: 1,
-                    padding: '0.6rem 0.9rem',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    fontSize: '0.9rem',
-                    outline: 'none',
-                  }}
-                  onFocus={(e) => (e.target.style.borderColor = '#3b82f6')}
-                  onBlur={(e) => (e.target.style.borderColor = '#d1d5db')}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleShare();
-                  }}
+                  onChange={e => { setShareUser(e.target.value); setShareMsg(''); }}
+                  placeholder="Share with username…"
+                  style={{ flex: 1, padding: '0.6rem 0.9rem', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '0.9rem', outline: 'none' }}
+                  onKeyDown={e => { if (e.key === 'Enter') handleShare(); }}
                 />
                 <button
                   onClick={handleShare}
                   disabled={sharing || !shareUsername.trim()}
-                  style={{
-                    padding: '0.6rem 1.1rem',
-                    backgroundColor: sharing ? '#9ca3af' : '#2563eb',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: '600',
-                    cursor: sharing ? 'not-allowed' : 'pointer',
-                    fontSize: '0.9rem',
-                    whiteSpace: 'nowrap',
-                  }}
+                  style={{ padding: '0.6rem 1.1rem', backgroundColor: sharing ? '#9ca3af' : '#2563eb', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: sharing ? 'not-allowed' : 'pointer' }}
                 >
-                  {sharing ? '...' : '🔗 Share'}
+                  {sharing ? '…' : 'Share'}
                 </button>
               </div>
-
               {shareMsg && (
-                <p
-                  style={{
-                    margin: '0.5rem 0 0',
-                    fontSize: '0.85rem',
-                    color: shareMsg.startsWith('✓') ? '#10b981' : '#dc2626',
-                  }}
-                >
+                <p style={{ marginTop: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: shareMsg.startsWith('✓') ? '#166534' : '#dc2626' }}>
                   {shareMsg}
                 </p>
               )}
             </div>
 
+            {/* Close */}
             <button
-              onClick={() => setSelectedPhoto(null)}
-              style={{
-                position: 'absolute',
-                top: '1rem',
-                right: '1rem',
-                backgroundColor: 'rgba(0,0,0,0.6)',
-                color: 'white',
-                border: 'none',
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                fontSize: '1.6rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
+              onClick={closeLightbox}
+              style={{ position: 'absolute', top: '0.75rem', right: '0.75rem', backgroundColor: 'rgba(0,0,0,0.6)', color: 'white', border: 'none', width: 36, height: 36, borderRadius: '50%', fontSize: '1.4rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
               ×
             </button>
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </>
   );
 }

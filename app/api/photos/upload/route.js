@@ -1,3 +1,4 @@
+// app/api/photos/upload/route.js
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import supabaseAdmin from "@/lib/supabaseAdmin";
@@ -5,142 +6,202 @@ import pool from "@/lib/db";
 import { initDb } from "@/lib/initDb";
 import sharp from "sharp";
 import * as exifr from "exifr";
+import { captionImage, embedText, toSqlVector } from "@/lib/hf";
+import { buildDescription } from "@/lib/description";
+import { matchFaceToPeople } from "@/lib/faceMatcher";
+
+// ── Reverse geocode coordinates → human-readable place name ──────────────────
+// Uses OpenStreetMap Nominatim — free, no API key required.
+async function reverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      { headers: { "User-Agent": "gathrd-photo-app/1.0" } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const a = data.address;
+    return (
+      [a.city || a.town || a.village || a.county, a.state, a.country]
+        .filter(Boolean)
+        .join(", ") || null
+    );
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req) {
   try {
     const session = await auth();
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     await initDb();
 
     const formData = await req.formData();
     const files = formData.getAll("photos");
+    const faceResultsRaw = formData.get("faceResults");
 
-    if (!files || files.length === 0) {
-      return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
+    let faceResultsMap = {};
+    if (faceResultsRaw) {
+      try {
+        for (const r of JSON.parse(faceResultsRaw)) {
+          faceResultsMap[r.name] = r;
+        }
+      } catch {}
     }
+
+    if (!files?.length) return NextResponse.json({ error: "No files uploaded" }, { status: 400 });
 
     let userId = null;
     if (session.user.username !== "admin") {
-      const result = await pool.query(
-        "SELECT id FROM users WHERE username = $1",
-        [session.user.username]
-      );
-      userId = result.rows[0]?.id || null;
+      const r = await pool.query("SELECT id FROM users WHERE username = $1", [session.user.username]);
+      userId = r.rows[0]?.id || null;
     }
 
     const uploadedPhotos = [];
 
     for (const file of files) {
       const bytes = await file.arrayBuffer();
-      const buffer = Buffer.from(bytes);
+      const rawBuffer = Buffer.from(bytes);
       const filename = `${Date.now()}-${file.name.replace(/\s+/g, "_")}`;
-      const path = `${session.user.username}/${filename}`;
+      const storagePath = `${session.user.username}/${filename}`;
 
+      // ── Sharp metadata ────────────────────────────────────────────────────
       let imageMeta = {};
-      let exifMeta = {};
+      try { imageMeta = await sharp(rawBuffer).metadata(); } catch {}
 
+      // ── Compress for upload ───────────────────────────────────────────────
+      let uploadBuffer = rawBuffer;
       try {
-        imageMeta = await sharp(buffer).metadata();
-      } catch (err) {
-        console.error("Sharp metadata error:", err);
+        uploadBuffer = await sharp(rawBuffer)
+          .rotate()
+          .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 85, progressive: true })
+          .toBuffer();
+      } catch {}
+
+      // ── EXIF ─────────────────────────────────────────────────────────────
+      let exif = {};
+      try { exif = await exifr.parse(rawBuffer, { gps: true }) ?? {}; } catch {}
+
+      // ── Reverse geocode GPS → place name ──────────────────────────────────
+      let placeName = null;
+      if (exif?.latitude && exif?.longitude) {
+        placeName = await reverseGeocode(exif.latitude, exif.longitude);
       }
 
-      try {
-        exifMeta = await exifr.parse(buffer, { gps: true });
-      } catch (err) {
-        console.error("EXIF parse error:", err);
-      }
-
+      // ── Upload to Supabase ────────────────────────────────────────────────
       const { error: uploadError } = await supabaseAdmin.storage
         .from("photos")
-        .upload(path, buffer, {
-          contentType: file.type,
-          upsert: false,
-        });
+        .upload(storagePath, uploadBuffer, { contentType: "image/jpeg", upsert: false });
 
-      if (uploadError) {
-        console.error("Upload error:", uploadError);
-        continue;
+      if (uploadError) { console.error("Upload error:", uploadError); continue; }
+
+      const { data: urlData } = supabaseAdmin.storage.from("photos").getPublicUrl(storagePath);
+      const url = urlData.publicUrl;
+
+      // ── Face data from client ─────────────────────────────────────────────
+      const faceData = faceResultsMap[file.name] || {};
+      const faceCount = faceData.faceCount ?? 0;
+      const emotion = faceData.dominantEmotion ?? null;
+      const descriptor = faceData.descriptor ?? null;
+
+      // ── Match against known people ────────────────────────────────────────
+      const matchedPeople = await matchFaceToPeople(descriptor, session.user.username);
+      const peopleNames = matchedPeople.map(p => p.name);
+
+      // ── BLIP visual caption ───────────────────────────────────────────────
+      let caption = null;
+      try {
+        caption = await captionImage(uploadBuffer);
+      } catch (err) {
+        console.error("BLIP caption error:", err.message);
       }
 
-      const { data: signedData, error: signedError } = await supabaseAdmin.storage
-        .from("photos")
-        .createSignedUrl(path, 60 * 60 * 24 * 365);
+      // ── Build description (from lib/description.js) ───────────────────────
+      const { description, needsRecaption } = buildDescription({
+        caption,
+        filename: file.name,
+        exif,
+        faceCount,
+        emotion,
+        peopleNames,
+        placeName,
+      });
 
-      if (signedError) {
-        console.error("Signed URL error:", signedError);
-        continue;
+      // ── Embed description ─────────────────────────────────────────────────
+      let embeddingValue = null;
+      try {
+        const emb = await embedText(description);
+        embeddingValue = toSqlVector(emb);
+      } catch (err) {
+        console.error("Embedding error:", err.message);
       }
 
-      const url = signedData.signedUrl;
-
-      await pool.query(
+      // ── DB insert ─────────────────────────────────────────────────────────
+      // Columns:  $1  user_id
+      //           $2  filename
+      //           $3  url
+      //           $4  uploaded_by
+      //           $5  storage_path
+      //           $6  mime_type
+      //           $7  file_size
+      //           $8  width
+      //           $9  height
+      //           $10 format
+      //           $11 date_taken
+      //           $12 camera_make
+      //           $13 camera_model
+      //           $14 latitude
+      //           $15 longitude
+      //           $16 place_name          ← new
+      //           $17 face_count
+      //           $18 dominant_emotion
+      //           $19 ai_description
+      //           $20 embedding
+      //           $21 needs_recaption
+      const inserted = await pool.query(
         `INSERT INTO photos (
-          user_id,
-          filename,
-          url,
-          uploaded_by,
-          storage_path,
-          mime_type,
-          file_size,
-          width,
-          height,
-          format,
-          date_taken,
-          camera_make,
-          camera_model,
-          latitude,
-          longitude
-        )
-        VALUES (
-          $1, $2, $3, $4, $5,
-          $6, $7, $8, $9, $10,
-          $11, $12, $13, $14, $15
-        )`,
+          user_id, filename, url, uploaded_by, storage_path,
+          mime_type, file_size, width, height, format,
+          date_taken, camera_make, camera_model, latitude, longitude,
+          place_name,
+          face_count, dominant_emotion, ai_description, embedding, needs_recaption
+        ) VALUES (
+          $1,$2,$3,$4,$5,
+          $6,$7,$8,$9,$10,
+          $11,$12,$13,$14,$15,
+          $16,
+          $17,$18,$19,$20::vector,$21
+        ) RETURNING id`,
         [
-          userId,
-          filename,
-          url,
-          session.user.username,
-          path,
-          file.type || null,
-          file.size || null,
-          imageMeta.width || null,
-          imageMeta.height || null,
-          imageMeta.format || null,
-          exifMeta?.DateTimeOriginal || null,
-          exifMeta?.Make || null,
-          exifMeta?.Model || null,
-          exifMeta?.latitude || null,
-          exifMeta?.longitude || null,
+          userId, filename, url, session.user.username, storagePath,
+          "image/jpeg", file.size || null,
+          imageMeta.width || null, imageMeta.height || null, imageMeta.format || null,
+          exif?.DateTimeOriginal || null, exif?.Make || null, exif?.Model || null,
+          exif?.latitude || null, exif?.longitude || null,
+          placeName || null,
+          faceCount, emotion, description, embeddingValue, needsRecaption,
         ]
       );
 
-      uploadedPhotos.push({
-        filename,
-        url,
-        metadata: {
-          width: imageMeta.width || null,
-          height: imageMeta.height || null,
-          format: imageMeta.format || null,
-          date_taken: exifMeta?.DateTimeOriginal || null,
-          camera_make: exifMeta?.Make || null,
-          camera_model: exifMeta?.Model || null,
-          latitude: exifMeta?.latitude || null,
-          longitude: exifMeta?.longitude || null,
-        },
-      });
+      const photoId = inserted.rows[0].id;
+
+      // ── Link to matched people ────────────────────────────────────────────
+      for (const person of matchedPeople) {
+        await pool.query(
+          "INSERT INTO photo_people (photo_id, person_id, confidence) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
+          [photoId, person.id, person.confidence]
+        );
+      }
+
+      uploadedPhotos.push({ filename, url, caption, description, peopleFound: peopleNames });
     }
 
     return NextResponse.json({ photos: uploadedPhotos }, { status: 201 });
   } catch (err) {
-    console.error("Upload route error:", err);
-    return NextResponse.json(
-      { error: "Internal server error", details: err.message },
-      { status: 500 }
-    );
+    console.error("Upload error:", err);
+    return NextResponse.json({ error: "Internal server error", details: err.message }, { status: 500 });
   }
 }
