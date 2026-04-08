@@ -1,8 +1,9 @@
+// app/api/photos/[id]/location/route.js
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { embedText, toSqlVector } from "@/lib/hf";
-import { addPhotoToLocationAlbum } from "@/lib/locationAlbum";
+import { syncLocationAlbum } from "@/lib/locationAlbum";
 
 export async function PATCH(req, { params }) {
   const session = await auth();
@@ -19,9 +20,11 @@ export async function PATCH(req, { params }) {
   if (!photo.rows.length) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const row = photo.rows[0];
+  const oldPlace = row.place_name;
+  const newPlace = placeName.trim();
 
   // Update place_name in DB
-  await pool.query("UPDATE photos SET place_name = $1 WHERE id = $2", [placeName.trim(), id]);
+  await pool.query("UPDATE photos SET place_name = $1 WHERE id = $2", [newPlace, id]);
 
   // Re-embed description with new location
   if (row.ai_description) {
@@ -29,7 +32,7 @@ export async function PATCH(req, { params }) {
       .replace(/Location:[^.]+\./g, '')
       .replace(/GPS[^.]+\./g, '')
       .trim();
-    const newDesc = `${oldDesc} Location: ${placeName.trim()}.`.trim();
+    const newDesc = `${oldDesc} Location: ${newPlace}.`.trim();
     try {
       const emb = await embedText(newDesc);
       await pool.query(
@@ -41,7 +44,16 @@ export async function PATCH(req, { params }) {
     }
   }
 
-  // Auto-group into location album
-await addPhotoToLocationAlbum(parseInt(id), placeName.trim(), session.user.username);
+  // Sync location album for the new place name (fire-and-forget style, don't fail the request)
+  try {
+    await syncLocationAlbum(session.user.username, newPlace);
+    // If the old place changed, re-sync the old album too (photo count may have dropped)
+    if (oldPlace && oldPlace !== newPlace) {
+      await syncLocationAlbum(session.user.username, oldPlace);
+    }
+  } catch (err) {
+    console.error("Location album sync error:", err);
+  }
+
   return NextResponse.json({ message: "Location updated" });
 }

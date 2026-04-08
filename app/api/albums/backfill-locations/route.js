@@ -1,8 +1,3 @@
-// app/api/albums/backfill-locations/route.js
-// Idempotent backfill + dedup run.
-// Merges duplicate location albums (case-insensitive) then re-groups all photos.
-// GET /api/albums/backfill-locations
-
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
