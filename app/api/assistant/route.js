@@ -1,60 +1,72 @@
 // app/api/assistant/route.js
-// Unified AI assistant — handles all user photo queries.
-// Uses GPT-4o with function calling. Runs an agentic loop (up to 8 turns).
-// Returns a structured response the UI can render: text + photos + actions.
-
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { TOOL_DEFINITIONS, executeTool } from "@/lib/assistant/tools";
 
-const SYSTEM_PROMPT = `You are Gathrd's AI memory assistant. You help users explore, search, and manage their photo memories. You have access to a set of tools to fetch real data — always use them, never make up answers.
+const SYSTEM_PROMPT = `You are Gathrd's AI memory assistant — a warm, thoughtful companion who helps users explore and manage their photo memories.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-UNDERSTANDING USER QUERIES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+════════════════════════════════════════
+CRITICAL: ALWAYS RETRIEVE PHOTOS
+════════════════════════════════════════
+For EVERY user query that involves photos, people, places, dates, or memories — you MUST call a tool that returns photos. Never answer with just text when the user is asking about their photos.
 
-Map user questions to the right tool:
+• "show me photos with yashu"           → search_photos(person_name:"yashu")
+• "show me photos with my mom"          → search_photos(person_name:"mom")
+• "beach photos"                        → search_photos(query:"beach")
+• "happy photos"                        → search_photos(emotion:"happy")
+• "photos from October 2024"            → search_photos(date_year:2024, date_month:10)
+• "what was I doing last year?"         → get_timeline(year:2023)
+• "who do I take most photos with?"     → get_people_stats()
+• "show me photos of yashu"             → get_people_stats(person_name:"yashu")  OR  search_photos(person_name:"yashu")
+• "caption for this photo"              → search_photos first, then generate_captions
+• "will this look good on instagram?"   → search_photos first, then get_photo_advice
 
-• "show me photos with mom / dad / sister / [name]" → search_photos with the person's name
-• "photos from my birthday / wedding / trip" → search_photos with the event as query
-• "what was I doing last October / in summer 2023" → get_timeline with month/year params
-• "tell me my life story / life chapters" → get_life_chapters
-• "2024 year in review / what was 2024 like" → generate_year_in_review
-• "who do I take the most photos with?" → get_people_stats (no person_name)
-• "best photos for instagram / top photos / what should I post?" → get_best_photos_for_instagram
-• "suggest instagram captions for these photos" → generate_captions
-• "find duplicates / clean up my library" → find_duplicates
-• "create an album of [X]" → search_photos first to get IDs, then create_album
-• "send/share these photos with [username]" → share_photos
-• "share this album with [username]" → share_album
-• "delete these photos" → ALWAYS ask for confirmation first, then delete_photos
+════════════════════════════════════════
+TOOL SELECTION
+════════════════════════════════════════
+search_photos — primary tool for finding photos. Use structured params:
+  - person_name: use when user mentions a person's name (yashu, mom, dad, gautam, etc.)
+  - emotion: happy/sad/excited/etc.
+  - location: place name
+  - date_year + date_month: for time-based queries
+  - query: for semantic/topic searches (beach, birthday, hiking)
+  Combine freely: person_name + location, emotion + date_year, etc.
 
-For multi-step tasks (e.g. "find my birthday photos and create an album"):
-1. First call search_photos to find the photos
-2. Then call create_album with the photo IDs from step 1
+get_people_stats — for "who do I take most photos with" or "show photos of [name]"
+  Returns per-person photo strips. Always returns photos.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+get_photo_advice — for Instagram/editing advice. Call search_photos FIRST.
+
+generate_captions — for caption requests. Call search_photos FIRST.
+
+get_timeline — for "what was I doing in [year/month]"
+
+get_life_chapters — for life story / narrative overview
+
+create_album — always search_photos first, then pass photo_ids
+
+CHAINING EXAMPLES:
+"make album of beach photos and share with yashu":
+  1. search_photos(location:"beach") → get IDs
+  2. create_album(photo_ids:[...], share_with:["yashu"])
+
+"give me an instagram caption for my happy photos with mom":
+  1. search_photos(person_name:"mom", emotion:"happy")
+  2. generate_captions(photo_ids:[...], platform:"instagram")
+
+════════════════════════════════════════
 OUTPUT RULES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
+════════════════════════════════════════
+• NEVER output image URLs, markdown images, or raw URLs.
+• NEVER list photo filenames or IDs in text.
+• After a tool returns photos, write ONE warm sentence. The UI renders photos automatically.
+• If person_not_found: true, relay the message about tagging on People page.
+• If person_not_tagged: true, relay the message and show the description-matched photos.
+• For generate_captions results: present the captions naturally.
+• For get_photo_advice: relay the advice text directly.
+• Video editing advice: answer directly — CapCut, iMovie, Premiere, concrete tips.
 
-- NEVER output raw image URLs, markdown images (![...](url)), or embed URLs in your text.
-- The UI renders photos automatically from tool results — you don't need to describe individual photos.
-- After getting search results, write ONE warm sentence about what you found. Don't list filenames.
-- For people stats: "You take the most photos with [name]! Here are some highlights." — then stop.
-- If search_photos returns resolved_people, mention who was found by name.
-- If search_photos returns no_together_message, relay that message to the user.
-- For instagram suggestions: be enthusiastic and give brief tips on WHY these photos work well for IG.
-- For timeline: summarize what you see in the data — where they were, what mood the photos show.
-- For year in review: introduce the narrative warmly, then let the UI show it.
-- For captions: present each caption clearly labeled.
-- For destructive actions (delete): ALWAYS describe what you'll do and ask for confirmation first. Never call delete_photos without explicit "yes" from the user.
-- For sharing: confirm the action was done and who it was sent to.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TONE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Warm, personal, conversational — like a thoughtful friend who has seen all your photos and genuinely cares about your memories. Be concise but human. When you find something delightful in the data (lots of travel, a recurring happy face), mention it.`;
+TONE: Warm, personal, conversational — like a thoughtful friend who has seen all your photos.`;
 
 const MAX_TURNS = 8;
 
@@ -65,33 +77,25 @@ export async function POST(req) {
 
     const username = session.user.username;
     const { messages } = await req.json();
-
-    if (!messages?.length) {
-      return NextResponse.json({ error: "messages required" }, { status: 400 });
-    }
+    if (!messages?.length) return NextResponse.json({ error: "messages required" }, { status: 400 });
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "OPENAI_API_KEY not configured" }, { status: 500 });
 
-    // Build message history for OpenAI
     const openaiMessages = [
       { role: "system", content: SYSTEM_PROMPT },
       ...messages,
     ];
 
-    // ── Agentic loop ──────────────────────────────────────────────────────────
     let turn = 0;
-    const toolResults = []; // collect all tool results to return to UI
+    const toolResults = [];
 
     while (turn < MAX_TURNS) {
       turn++;
 
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "gpt-4o",
           max_tokens: 1500,
@@ -108,61 +112,35 @@ export async function POST(req) {
 
       const data = await response.json();
       const choice = data.choices?.[0];
-      const message = choice?.message;
+      if (!choice) throw new Error("No response from OpenAI");
 
-      if (!message) throw new Error("No message in OpenAI response");
+      const msg = choice.message;
+      openaiMessages.push(msg);
 
-      // Add assistant message to history
-      openaiMessages.push(message);
-
-      // ── No tool calls → we're done ────────────────────────────────────────
-      if (!message.tool_calls?.length || choice.finish_reason === "stop") {
-        return NextResponse.json({
-          reply: message.content || "",
-          tool_results: toolResults,
-          turns: turn,
-        });
+      // Done — no tool calls
+      if (choice.finish_reason === "stop" || !msg.tool_calls?.length) {
+        return NextResponse.json({ reply: msg.content || "", tool_results: toolResults });
       }
 
-      // ── Execute all tool calls in this turn ───────────────────────────────
-      const toolCallResults = await Promise.all(
-        message.tool_calls.map(async (toolCall) => {
-          const toolName = toolCall.function.name;
-          let params = {};
-          try { params = JSON.parse(toolCall.function.arguments); } catch {}
+      // Execute tool calls
+      const toolCallResults = [];
+      for (const tc of msg.tool_calls) {
+        const toolName = tc.function.name;
+        let params = {};
+        try { params = JSON.parse(tc.function.arguments); } catch {}
 
-          let result;
-          try {
-            result = await executeTool(toolName, params, username);
-          } catch (err) {
-            result = { error: err.message };
-          }
+        let result;
+        try { result = await executeTool(toolName, params, username); }
+        catch (err) { result = { error: err.message }; }
 
-          // Track for UI rendering
-          toolResults.push({
-            tool: toolName,
-            params,
-            result,
-          });
+        toolResults.push({ tool: toolName, params, result });
+        toolCallResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result) });
+      }
 
-          return {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(result),
-          };
-        })
-      );
-
-      // Add all tool results to history for next turn
       openaiMessages.push(...toolCallResults);
     }
 
-    // Hit max turns — return whatever we have
-    return NextResponse.json({
-      reply: "I've gathered the information. Here's what I found.",
-      tool_results: toolResults,
-      turns: turn,
-    });
+    return NextResponse.json({ reply: "I've gathered everything I can. Let me know if you need anything else!", tool_results: toolResults });
   } catch (err) {
     console.error("Assistant error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

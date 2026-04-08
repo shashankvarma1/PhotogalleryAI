@@ -9,6 +9,7 @@ import * as exifr from "exifr";
 import { captionImage, embedText, toSqlVector } from "@/lib/hf";
 import { buildDescription } from "@/lib/description";
 import { matchFaceToPeople } from "@/lib/faceMatcher";
+import { addPhotoToLocationAlbum } from "@/lib/locationAlbum";
 
 const VIDEO_MIME_TYPES = new Set([
   "video/mp4", "video/quicktime", "video/x-msvideo",
@@ -87,48 +88,68 @@ export async function POST(req) {
       const storagePath = `${session.user.username}/${filename}`;
 
       // ── VIDEO PATH ────────────────────────────────────────────────────────
+      // ── VIDEO PATH ────────────────────────────────────────────────────────
       if (isVideo(file)) {
-        const mimeType = file.type || "video/mp4";
-
-        const { error: uploadError } = await supabaseAdmin.storage
-          .from("photos")
-          .upload(storagePath, rawBuffer, { contentType: mimeType, upsert: false });
-
-        if (uploadError) {
-          console.error("Video upload error:", uploadError);
-          continue;
-        }
-
-        const { data: urlData } = supabaseAdmin.storage.from("photos").getPublicUrl(storagePath);
-        const url = urlData.publicUrl;
-
-        // Simple text description for video — no vision API
-        const description = buildVideoDescription(file.name);
-
-        let embeddingValue = null;
         try {
-          const emb = await embedText(description);
-          embeddingValue = toSqlVector(emb);
-        } catch {}
+          // Derive MIME type — file.type is often empty for .mov from iOS
+          const ext = file.name.split('.').pop()?.toLowerCase() || '';
+          const mimeType = file.type ||
+            ({ mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo',
+               webm: 'video/webm', mkv: 'video/x-matroska' }[ext] || 'video/mp4');
 
-        const inserted = await pool.query(
-          `INSERT INTO photos (
-            user_id, filename, url, uploaded_by, storage_path,
-            mime_type, file_size,
-            ai_description, embedding, needs_recaption
-          ) VALUES (
-            $1,$2,$3,$4,$5,
-            $6,$7,
-            $8,$9::vector,$10
-          ) RETURNING id`,
-          [
-            userId, filename, url, session.user.username, storagePath,
-            mimeType, file.size || null,
-            description, embeddingValue, false,
-          ]
-        );
+          const { error: uploadError } = await supabaseAdmin.storage
+            .from("photos")
+            .upload(storagePath, rawBuffer, { contentType: mimeType, upsert: false });
 
-        uploadedPhotos.push({ filename, url, description, isVideo: true });
+          if (uploadError) {
+            console.error("Video storage upload error:", uploadError.message);
+            continue;
+          }
+
+          const { data: urlData } = supabaseAdmin.storage.from("photos").getPublicUrl(storagePath);
+          if (!urlData?.publicUrl) {
+            console.error("Video: no public URL returned");
+            continue;
+          }
+          const url = urlData.publicUrl;
+
+          const description = buildVideoDescription(file.name);
+
+          let embeddingValue = null;
+          try {
+            const emb = await embedText(description);
+            embeddingValue = toSqlVector(emb);
+          } catch {}
+
+          // Safe file size — .size may be undefined on server FormData File
+          let fileSize = null;
+          try { fileSize = file.size > 0 ? file.size : null; } catch {}
+
+          await pool.query(
+            `INSERT INTO photos (
+              user_id, filename, url, uploaded_by, storage_path,
+              mime_type, file_size,
+              ai_description, embedding, needs_recaption
+            ) VALUES (
+              $1,$2,$3,$4,$5,
+              $6,$7,
+              $8,$9::vector,$10
+            ) RETURNING id`,
+            [
+              userId, filename, url, session.user.username, storagePath,
+              mimeType, fileSize,
+              description, embeddingValue, false,
+            ]
+          );
+
+          uploadedPhotos.push({ filename, url, description, isVideo: true });
+          // Auto-add to location album if photo has a place
+if (placeName) {
+  await addPhotoToLocationAlbum(photoId, placeName, session.user.username);
+}
+        } catch (videoErr) {
+          console.error("Video upload failed for", file.name, ":", videoErr.message);
+        }
         continue;
       }
 

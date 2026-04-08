@@ -1,209 +1,299 @@
 'use client';
+
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useSession } from 'next-auth/react';
+import { useSession, signOut } from 'next-auth/react';
 
-
-const navItems = [
-  { href: '/',        label: 'Home',          icon: HomeIcon    },
-  { href: '/gallery', label: 'Gallery',        icon: GalleryIcon },
-  { href: '/albums',  label: 'Albums',         icon: AlbumsIcon  },
-  { href: '/groups',  label: 'Groups',         icon: GroupsIcon  },
-  { href: '/shared',  label: 'Shared With Me', icon: SharedIcon  },
-  { href: '/people',  label: 'People',         icon: PeopleIcon  },
-  // { href: '/search',  label: 'Search & Filter',icon: SearchIcon  },
-  { href: '/assistant', label: 'AI Assistant', icon: AgentIcon },
+const NAV = [
+  { href: '/',          icon: '🏠', label: 'Home'      },
+  { href: '/gallery',   icon: '🖼️',  label: 'Gallery'   },
+  { href: '/search',    icon: '🔍', label: 'Search'    },
+  { href: '/assistant', icon: '✨', label: 'Assistant' },
+  { href: '/albums',    icon: '📁', label: 'Albums'    },
+  { href: '/people',    icon: '👤', label: 'People'    },
+  { href: '/map',       icon: '🗺️',  label: 'Places'    },
+  { href: '/shared',    icon: '🤝', label: 'Shared'    },
 ];
 
+const C = 60;   // collapsed width px
+const E = 240;  // expanded width px
+
 export default function Sidebar() {
-  const pathname  = usePathname();
+  const pathname           = usePathname();
   const { data: session } = useSession();
+  const [open, setOpen]   = useState(false);
+  const ref               = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (open && ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
+  }, [open]);
+
+  // Close on route change
+  useEffect(() => { setOpen(false); }, [pathname]);
 
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700&family=Instrument+Serif:ital@1&display=swap');
 
-        .sidebar {
-          position: fixed; top: 62px; left: 0; bottom: 0; width: 240px;
-          background: rgba(245,242,236,0.96);
-          backdrop-filter: blur(16px);
-          -webkit-backdrop-filter: blur(16px);
-          border-right: 1px solid rgba(17,17,17,0.08);
-          padding: 20px 12px 100px;
-          overflow-y: auto; z-index: 900;
-          display: flex; flex-direction: column;
-        }
-        .sidebar::-webkit-scrollbar { width: 0; }
-
-        /* Find the .sidebar rule and add this immediately after its closing brace: */
-@media (max-width: 1023px) {
-  .sidebar { display: none !important; }
-}
-
-        @keyframes slideInLeft {
-          from { opacity:0; transform:translateX(-12px); }
-          to   { opacity:1; transform:translateX(0); }
-        }
-
-        .nav-link {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 12px; border-radius: 10px;
-          font-family: 'Syne', sans-serif;
-          font-size: 13px; font-weight: 500;
-          letter-spacing: 0.01em;
-          color: rgba(17,17,17,0.45);
+        .sb-link {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 0 10px 16px;
           text-decoration: none;
-          transition: background 0.18s, color 0.18s;
-          border: 1px solid transparent;
+          border-radius: 10px;
+          margin: 2px 8px;
+          position: relative;
+          overflow: hidden;
+          white-space: nowrap;
+          transition: background 0.12s;
         }
-        .nav-link:hover {
-          background: rgba(17,17,17,0.05);
+        .sb-link:hover            { background: rgba(17,17,17,0.05); }
+        .sb-link.sb-active        { background: rgba(17,17,17,0.08); }
+
+        .sb-icon {
+          font-size: 18px;
+          width: 26px;
+          text-align: center;
+          flex-shrink: 0;
+          line-height: 1;
+        }
+
+        .sb-label {
+          font-family: 'Syne', sans-serif;
+          font-size: 13px;
+          font-weight: 500;
+          color: rgba(17,17,17,0.6);
+          letter-spacing: 0.01em;
+        }
+        .sb-link.sb-active .sb-label {
           color: #111;
+          font-weight: 700;
         }
-        .nav-link.active {
+
+        .sb-active-bar {
+          position: absolute;
+          left: 0; top: 50%;
+          transform: translateY(-50%);
+          width: 3px; height: 18px;
+          border-radius: 0 3px 3px 0;
+          background: #111;
+        }
+
+        .sb-tip {
+          position: absolute;
+          left: calc(${C}px + 10px);
+          top: 50%;
+          transform: translateY(-50%);
           background: #111;
           color: #f2efe9;
-          font-weight: 700;
-          box-shadow: 0 4px 16px rgba(0,0,0,0.12);
-        }
-        .nav-link.active svg { opacity: 1; }
-        .nav-link svg { opacity: 0.55; transition: opacity 0.18s; flex-shrink: 0; }
-        .nav-link:hover svg { opacity: 0.85; }
-
-        .active-dot {
-          width: 5px; height: 5px; border-radius: 50%;
-          background: rgba(242,239,233,0.7);
-          margin-left: auto; flex-shrink: 0;
-        }
-
-        .nav-label {
-          flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-
-        .section-gap { height: 8px; }
-
-        .admin-link {
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 12px; border-radius: 10px;
           font-family: 'Syne', sans-serif;
-          font-size: 13px; font-weight: 600;
-          letter-spacing: 0.01em;
-          color: rgba(17,17,17,0.5);
-          text-decoration: none;
-          background: rgba(17,17,17,0.04);
-          border: 1.5px solid rgba(17,17,17,0.1);
-          transition: background 0.18s, color 0.18s, border-color 0.18s;
-          margin-top: 8px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.05em;
+          padding: 5px 10px;
+          border-radius: 6px;
+          white-space: nowrap;
+          pointer-events: none;
+          opacity: 0;
+          transition: opacity 0.12s;
+          z-index: 400;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
-        .admin-link:hover {
-          background: rgba(17,17,17,0.08);
-          color: #111; border-color: rgba(17,17,17,0.22);
-        }
-        .admin-link.active {
-          background: #111; color: #f2efe9;
-          border-color: transparent;
-        }
-
-        .sidebar-footer {
-          position: absolute; bottom: 0; left: 0; right: 0;
-          padding: 16px 12px;
-          border-top: 1px solid rgba(17,17,17,0.07);
-          background: rgba(245,242,236,0.98);
-        }
-        .footer-inner {
-          padding: 12px 14px; border-radius: 12px;
-          background: rgba(17,17,17,0.04);
-          border: 1px solid rgba(17,17,17,0.07);
-          display: flex; align-items: center; gap: 10px;
-        }
-        .footer-wordmark {
-          font-family: 'Syne', sans-serif;
-          font-size: 14px; font-weight: 800;
-          letter-spacing: -0.04em; color: #111;
-        }
-        .footer-version {
-          font-family: 'Syne', sans-serif;
-          font-size: 10px; font-weight: 500;
-          letter-spacing: 0.08em; text-transform: uppercase;
-          color: rgba(17,17,17,0.3);
-          margin-left: auto;
-        }
+        .sb-link:hover .sb-tip { opacity: 1; }
       `}</style>
 
-      <aside className="sidebar">
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-          {/* Original navItems map — href and label untouched */}
-          {navItems.map(({ href, label, icon: Icon }, i) => {
-            const active = pathname === href;
+      {/* Backdrop */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(10,8,6,0.25)',
+            zIndex: 198,
+            backdropFilter: 'blur(2px)',
+          }}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        ref={ref}
+        style={{
+          position: 'fixed',
+          top: 0, left: 0, bottom: 0,
+          width: open ? E : C,
+          background: '#faf8f4',
+          borderRight: '1px solid rgba(17,17,17,0.08)',
+          zIndex: 199,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          transition: 'width 0.24s cubic-bezier(0.22,1,0.36,1)',
+          boxShadow: open ? '4px 0 24px rgba(0,0,0,0.08)' : '1px 0 0 rgba(17,17,17,0.06)',
+        }}
+      >
+        {/* ── Logo / toggle button ── */}
+        <button
+          onClick={() => setOpen(o => !o)}
+          style={{
+            height: 62,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '0 0 0 15px',
+            background: 'none',
+            border: 'none',
+            borderBottom: '1px solid rgba(17,17,17,0.07)',
+            cursor: 'pointer',
+            flexShrink: 0,
+            width: '100%',
+            textAlign: 'left',
+          }}
+        >
+          {/* Logo pill */}
+          <div style={{
+            width: 30, height: 30,
+            borderRadius: 8,
+            background: '#111',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: "'Instrument Serif', serif",
+            fontStyle: 'italic',
+            fontSize: 16,
+            fontWeight: 400,
+            color: '#f2efe9',
+            flexShrink: 0,
+          }}>g</div>
+
+          {/* App name — fades in when open */}
+          <span style={{
+            fontFamily: "'Instrument Serif', serif",
+            fontStyle: 'italic',
+            fontSize: 18,
+            color: '#111',
+            flex: 1,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            opacity: open ? 1 : 0,
+            transform: open ? 'translateX(0)' : 'translateX(-6px)',
+            transition: 'opacity 0.18s, transform 0.18s',
+            pointerEvents: 'none',
+          }}>
+            Gathrd
+          </span>
+
+          {/* Close × — only when open */}
+          {open && (
+            <span style={{
+              fontSize: 13,
+              color: 'rgba(17,17,17,0.3)',
+              marginRight: 14,
+              flexShrink: 0,
+              lineHeight: 1,
+            }}>✕</span>
+          )}
+        </button>
+
+        {/* ── Nav links ── */}
+        <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto', overflowX: 'hidden' }}>
+          {NAV.map(({ href, icon, label }) => {
+            const active = pathname === href || (href !== '/' && pathname?.startsWith(href));
             return (
               <Link
                 key={href}
                 href={href}
-                className={`nav-link${active ? ' active' : ''}`}
-                style={{ animationDelay: `${i * 0.04}s`, animation: `slideInLeft 0.4s ease ${i * 0.04}s both` }}
+                className={`sb-link${active ? ' sb-active' : ''}`}
               >
-                <Icon active={active} />
-                <span className="nav-label">{label}</span>
-                {active && <span className="active-dot" />}
+                {active && <span className="sb-active-bar" />}
+                <span className="sb-icon">{icon}</span>
+                <span
+                  className="sb-label"
+                  style={{
+                    opacity: open ? 1 : 0,
+                    transition: 'opacity 0.15s',
+                  }}
+                >
+                  {label}
+                </span>
+                {!open && <span className="sb-tip">{label}</span>}
               </Link>
             );
           })}
-
-          <div className="section-gap" />
-
-          {/* Original admin check — condition untouched */}
-          {session?.user?.role === 'admin' && (
-            <Link
-              href="/admin"
-              className={`admin-link${pathname === '/admin' ? ' active' : ''}`}
-            >
-              <AdminIcon active={pathname === '/admin'} />
-              <span className="nav-label">Admin Dashboard</span>
-              {pathname === '/admin' && <span className="active-dot" />}
-            </Link>
-          )}
         </nav>
 
-        {/* Footer — original "GathRd v1.0" text preserved */}
-        <div className="sidebar-footer">
-          <div className="footer-inner">
-            <span className="footer-wordmark">gathrd</span>
-            <span className="footer-version">v1.0</span>
+        {/* ── Divider ── */}
+        <div style={{ height: 1, background: 'rgba(17,17,17,0.07)', margin: '0 10px' }} />
+
+        {/* ── User row ── */}
+        {session && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '14px 0 14px 16px',
+            flexShrink: 0,
+          }}>
+            {/* Avatar */}
+            <div style={{
+              width: 28, height: 28,
+              borderRadius: '50%',
+              background: '#111',
+              color: '#f2efe9',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: 700,
+              fontFamily: "'Syne', sans-serif",
+              flexShrink: 0,
+            }}>
+              {session.user.username?.[0]?.toUpperCase() || '?'}
+            </div>
+
+            {/* Username + sign out — visible when open */}
+            <div style={{
+              display: 'flex', alignItems: 'center', flex: 1, minWidth: 0,
+              opacity: open ? 1 : 0,
+              transition: 'opacity 0.15s',
+              pointerEvents: open ? 'auto' : 'none',
+            }}>
+              <span style={{
+                fontFamily: "'Syne', sans-serif",
+                fontSize: 12, fontWeight: 600,
+                color: 'rgba(17,17,17,0.55)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                flex: 1,
+              }}>
+                {session.user.username}
+              </span>
+              <button
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                title="Sign out"
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'rgba(17,17,17,0.3)',
+                  fontSize: 15, padding: '4px 12px 4px 4px',
+                  flexShrink: 0,
+                  transition: 'color 0.15s',
+                  lineHeight: 1,
+                }}
+                onMouseEnter={e => e.currentTarget.style.color = '#dc2626'}
+                onMouseLeave={e => e.currentTarget.style.color = 'rgba(17,17,17,0.3)'}
+              >
+                ⏻
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </aside>
     </>
   );
-}
-
-// ── SVG Icons ─────────────────────────────────────────────────────────────────
-const ic = (active) => ({ stroke: active ? '#f2efe9' : 'rgba(17,17,17,0.7)', strokeWidth: '1.8', fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' });
-
-function HomeIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>;
-}
-function GalleryIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>;
-}
-function AlbumsIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><path d="M3 7a2 2 0 0 1 2-2h3l2 2h9a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>;
-}
-function GroupsIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><circle cx="9" cy="7" r="3"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.87"/></svg>;
-}
-function SharedIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>;
-}
-function PeopleIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>;
-}
-function SearchIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>;
-}
-function AdminIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>;
-}
-function AgentIcon({ active }) {
-  return <svg width="16" height="16" viewBox="0 0 24 24" {...ic(active)}><path d="M12 2a8 8 0 0 1 8 8c0 3.5-2 6.5-5 7.7V20h-6v-2.3C6 16.5 4 13.5 4 10a8 8 0 0 1 8-8z"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="17" x2="12" y2="20"/></svg>;
 }
