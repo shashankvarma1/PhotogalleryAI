@@ -8,8 +8,6 @@ import BottomNav from '../../components/BottomNav';
 const SUGGESTIONS = [
   "What was I doing last October?",
   "Show me photos with my family",
-  "Tell me my life story in chapters",
-  "Give me a 2024 year in review",
   "Find my best photos for Instagram",
   "Who do I take the most photos with?",
   "Create an album of my recent trip",
@@ -497,6 +495,9 @@ export default function AssistantPage() {
       });
 
       const data = await res.json();
+      
+      console.log("ASSISTANT RESPONSE", JSON.stringify(data, null, 2));
+
 
       if (!res.ok) throw new Error(data.error || 'Request failed');
 
