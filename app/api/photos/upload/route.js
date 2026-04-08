@@ -11,6 +11,7 @@ import { buildDescription } from "@/lib/description";
 import { matchFaceToPeople } from "@/lib/faceMatcher";
 import { syncLocationAlbum } from "@/lib/locationAlbum";
 
+
 const VIDEO_MIME_TYPES = new Set([
   "video/mp4", "video/quicktime", "video/x-msvideo",
   "video/webm", "video/x-matroska", "video/mpeg",
@@ -254,6 +255,14 @@ export async function POST(req) {
           "INSERT INTO photo_people (photo_id, person_id, confidence) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING",
           [photoId, person.id, person.confidence]
         );
+      }
+
+       if (placeName) {
+        try {
+          await syncLocationAlbum(session.user.username, photoId, placeName);
+        } catch (err) {
+          console.error("Location album sync error:", err.message);
+        }
       }
 
       // Track location for album sync

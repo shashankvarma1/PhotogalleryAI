@@ -55,5 +55,11 @@ export async function PATCH(req, { params }) {
     console.error("Location album sync error:", err);
   }
 
+   try {
+    await syncLocationAlbum(session.user.username, parseInt(id), placeName.trim());
+  } catch (err) {
+    console.error("Location album sync error:", err.message);
+  }
+
   return NextResponse.json({ message: "Location updated" });
 }

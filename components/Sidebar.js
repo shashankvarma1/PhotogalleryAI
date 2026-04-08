@@ -8,7 +8,7 @@ import { useSession, signOut } from 'next-auth/react';
 const NAV = [
   { href: '/',          icon: '🏠', label: 'Home'      },
   { href: '/gallery',   icon: '🖼️',  label: 'Gallery'   },
-  { href: '/search',    icon: '🔍', label: 'Search'    },
+  // { href: '/search',    icon: '🔍', label: 'Search'    },
   { href: '/assistant', icon: '✨', label: 'Assistant' },
   { href: '/albums',    icon: '📁', label: 'Albums'    },
   { href: '/people',    icon: '👤', label: 'People'    },
