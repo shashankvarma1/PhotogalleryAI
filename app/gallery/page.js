@@ -1,60 +1,50 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import * as faceapi from 'face-api.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import supabase from '@/lib/supabaseBrowser';
 import Header from '../../components/Header';
 import Sidebar from '../../components/Sidebar';
 import BottomNav from '../../components/BottomNav';
 
-const EMOTION_EMOJI = {
-  happy: '😊', excited: '🎉', surprised: '😮',
-  calm: '😌', neutral: '😐', sad: '😢',
-  fearful: '😨', angry: '😠', disgusted: '🤢',
-};
+const VIDEO_TYPES = [
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+  'video/mov',
+  'video/x-matroska',
+];
 
-const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mov'];
-const isVideoFile = (file) => VIDEO_TYPES.includes(file.type) || /\.(mp4|mov|avi|webm|mkv)$/i.test(file.name);
+const isVideoFile = (file) =>
+  VIDEO_TYPES.includes(file?.type) ||
+  /\.(mp4|mov|avi|webm|mkv)$/i.test(file?.name || '');
+
+const isVideoItem = (item) =>
+  item?.media_type === 'video' ||
+  item?.mime_type?.startsWith('video/') ||
+  /\.(mp4|mov|avi|webm|mkv)$/i.test(item?.filename || '');
 
 export default function Gallery() {
-  const [photos, setPhotos]           = useState([]);
-  const [selectedPhoto, setSelected]  = useState(null);
-  const [uploading, setUploading]     = useState(false);
-  const [uploadStatus, setStatus]     = useState('');
-  const [selectMode, setSelectMode]   = useState(false);
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [deleting, setDeleting]       = useState(false);
-  const [deleteError, setDeleteError] = useState('');
-  const [shareUsername, setShareUser] = useState('');
-  const [sharing, setSharing]         = useState(false);
-  const [shareMsg, setShareMsg]       = useState('');
-  const [modelsLoaded, setModels]     = useState(false);
-
-  // Re-analysis state
-  const [reanalyzing, setReanalyzing]             = useState(false);
-  const [reanalyzeMsg, setReanalyzeMsg]           = useState('');
-  const [reanalyzeProgress, setReanalyzeProgress] = useState(null);
-
-  // Location edit state
-  const [editingLocation, setEditingLocation] = useState(null);
-  const [locationInput, setLocationInput]     = useState('');
-  const [savingLocation, setSavingLocation]   = useState(false);
-
-  const tileRefs = useRef({});
-
+  const [items, setItems] = useState([]);
   const [selectedIndex, setSelectedIndex] = useState(null);
 
-  useEffect(() => { fetchPhotos(); }, []);
+  const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState('');
 
-  // ── Load face-api models in background — upload is NOT gated on this ──────
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  const fileInputRef = useRef(null);
+
+  const selectedItem = useMemo(
+    () => (selectedIndex !== null ? items[selectedIndex] : null),
+    [items, selectedIndex]
+  );
+
   useEffect(() => {
-    Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-      faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-      faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
-      faceapi.nets.faceExpressionNet.loadFromUri('/models'),
-    ])
-      .then(() => setModels(true))
-      .catch(() => setModels(true));
+    fetchMedia();
   }, []);
 
   const fetchMedia = async () => {
@@ -75,22 +65,15 @@ export default function Gallery() {
         console.error('Videos fetch failed:', videosData);
       }
 
-      const detections = await faceapi
-        .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
-        .withFaceLandmarks()
-        .withFaceExpressions()
-        .withFaceDescriptors();
+      const photos = (photosData.photos || []).map((photo) => ({
+        ...photo,
+        media_type: 'photo',
+      }));
 
-      URL.revokeObjectURL(url);
-
-      if (!detections.length) {
-        return { name: file.name, faceCount: 0, dominantEmotion: null, descriptor: null };
-      }
-
-      const main = detections.reduce((a, b) =>
-        b.detection.box.width * b.detection.box.height >
-        a.detection.box.width * a.detection.box.height ? b : a
-      );
+      const videos = (videosData.videos || []).map((video) => ({
+        ...video,
+        media_type: 'video',
+      }));
 
       const combined = [...photos, ...videos].sort(
         (a, b) =>
@@ -176,7 +159,7 @@ export default function Gallery() {
     if (!files?.length) return;
 
     setUploading(true);
-    setStatus(`Processing ${files.length} file${files.length > 1 ? 's' : ''}…`);
+    setUploadStatus(`Uploading ${files.length} file${files.length > 1 ? 's' : ''}...`);
 
     try {
       const allFiles = Array.from(files);
@@ -188,32 +171,36 @@ export default function Gallery() {
 
       await fetchMedia();
 
-      setUploadMsg(
+      setUploadStatus(
         `Uploaded ${photoCount} photo${photoCount !== 1 ? 's' : ''} and ${videoCount} video${videoCount !== 1 ? 's' : ''}`
       );
     } catch (err) {
-      console.error('Upload error:', err);
-      setStatus('Something went wrong');
-    }
-    setUploading(false);
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      console.error('UPLOAD ERROR:', err);
+      setUploadStatus(err?.message || 'Something went wrong while uploading');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
   const toggleSelect = (id) => {
-    const s = new Set(selectedIds);
-    s.has(id) ? s.delete(id) : s.add(id);
-    setSelectedIds(s);
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
   };
 
   const handleDelete = async (ids) => {
-    if (!confirm(`Delete ${ids.length} photo${ids.length > 1 ? 's' : ''}?`)) return;
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} item${ids.length !== 1 ? 's' : ''}?`)) return;
+
     setDeleting(true);
     setDeleteError('');
+
     try {
-      const selectedItems = items.filter((item) => selectedIds.has(item.id));
+      const selectedItems = items.filter((item) => ids.includes(item.id));
 
       await Promise.all(
         selectedItems.map((item) => {
@@ -236,78 +223,37 @@ export default function Gallery() {
       await fetchMedia();
     } catch (err) {
       console.error('DELETE ERROR:', err);
+      setDeleteError('Failed to delete selected items');
+    } finally {
+      setDeleting(false);
     }
-    setDeleting(false);
   };
 
-  const handleShare = async () => {
-    if (!shareUsername.trim()) return;
-    setSharing(true);
-    setShareMsg('');
-    const res = await fetch('/api/share/photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ photoId: selectedPhoto.id, shareWith: shareUsername.trim() }),
-    });
-    const data = await res.json();
-    if (res.ok) { setShareMsg(`✓ Shared with ${shareUsername}`); setShareUser(''); }
-    else setShareMsg(`✗ ${data.error}`);
-    setSharing(false);
+  const goPrev = () => {
+    if (selectedIndex === null || !items.length) return;
+    setSelectedIndex((prev) => (prev - 1 + items.length) % items.length);
   };
 
-  // ── Save manual location ──────────────────────────────────────────────────
-  const handleSaveLocation = async () => {
-    if (!locationInput.trim() || !editingLocation) return;
-    setSavingLocation(true);
-    try {
-      const res = await fetch(`/api/photos/${editingLocation}/location`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ placeName: locationInput.trim() }),
-      });
-      if (res.ok) {
-        // Update the selected photo state immediately so UI reflects new location
-        const newPlace = locationInput.trim();
-        setSelected(prev => prev ? { ...prev, place_name: newPlace } : prev);
-        // Also update the photos list so the gallery reflects it
-        setPhotos(prev => prev.map(p => p.id === editingLocation ? { ...p, place_name: newPlace } : p));
-      }
-    } catch (err) {
-      console.error('Save location error:', err);
-    }
-    setSavingLocation(false);
-    setEditingLocation(null);
-    setLocationInput('');
-  };
-
-  const startEditLocation = () => {
-    if (!selectedPhoto) return;
-    setEditingLocation(selectedPhoto.id);
-    setLocationInput(selectedPhoto.place_name || '');
-  };
-
-  const cancelEditLocation = () => {
-    setEditingLocation(null);
-    setLocationInput('');
-  };
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return null;
-    try {
-      return new Date(dateStr).toLocaleDateString(undefined, {
-        year: 'numeric', month: 'long', day: 'numeric',
-        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      });
-    } catch { return null; }
+  const goNext = () => {
+    if (selectedIndex === null || !items.length) return;
+    setSelectedIndex((prev) => (prev + 1) % items.length);
   };
 
   const closeLightbox = () => {
-    setSelected(null);
     setSelectedIndex(null);
-    setEditingLocation(null);
-    setLocationInput('');
-    setShareMsg('');
-    setShareUser('');
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    try {
+      return new Date(dateStr).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    } catch {
+      return 'N/A';
+    }
   };
 
   return (
@@ -317,7 +263,15 @@ export default function Gallery() {
       <BottomNav />
 
       <main
-        style={{ marginLeft: '0', marginTop: '64px', padding: '1.5rem', paddingBottom: '90px', minHeight: 'calc(100vh - 64px - 90px)', backgroundColor: '#f2efe9', transition: 'margin-left 0.3s' }}
+        style={{
+          marginLeft: '0',
+          marginTop: '64px',
+          padding: '1.5rem',
+          paddingBottom: '90px',
+          minHeight: 'calc(100vh - 64px - 90px)',
+          backgroundColor: '#f2efe9',
+          transition: 'margin-left 0.3s',
+        }}
         className="lg:ml-[240px] lg:p-10 lg:pb-10"
       >
         <div
@@ -358,41 +312,68 @@ export default function Gallery() {
               <button
                 onClick={() => handleDelete([...selectedIds])}
                 disabled={deleting}
-                style={{ padding: '0.8rem 1.25rem', backgroundColor: deleting ? '#9ca3af' : '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 600, cursor: deleting ? 'not-allowed' : 'pointer' }}
+                style={{
+                  padding: '0.7rem 1rem',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: '#dc2626',
+                  color: '#fff',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  opacity: deleting ? 0.7 : 1,
+                }}
               >
-                {deleting ? 'Deleting…' : `Delete (${selectedIds.size})`}
+                {deleting ? 'Deleting...' : `Delete ${selectedIds.size}`}
               </button>
             )}
 
-            {!selectMode && (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.8rem 1.5rem', backgroundColor: uploading ? '#9ca3af' : '#2563eb', color: 'white', borderRadius: '8px', fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer' }}>
-                {uploading ? uploadStatus || 'Uploading…' : '+ Upload'}
-                <input
-                  type="file"
-                  accept="image/*,video/mp4,video/quicktime,video/x-msvideo,video/webm"
-                  multiple
-                  onChange={handleFileChange}
-                  disabled={uploading}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            )}
+            <label
+              style={{
+                padding: '0.7rem 1rem',
+                borderRadius: 8,
+                background: uploading ? '#9ca3af' : '#111',
+                color: '#fff',
+                cursor: uploading ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {uploading ? 'Uploading...' : '+ Upload'}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                style={{ display: 'none' }}
+                disabled={uploading}
+                onChange={(e) => handleUpload(Array.from(e.target.files || []))}
+              />
+            </label>
           </div>
         </div>
 
-        {/* ── Status banners ──────────────────────────────────────────── */}
-        {uploadStatus && !uploading && (
-          <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', backgroundColor: uploadStatus.startsWith('✓') ? '#f0fdf4' : '#fef2f2', border: `1px solid ${uploadStatus.startsWith('✓') ? '#bbf7d0' : '#fecaca'}`, borderRadius: '8px', color: uploadStatus.startsWith('✓') ? '#166534' : '#991b1b', fontSize: '0.9rem' }}>
+        {uploadStatus && (
+          <div
+            style={{
+              marginBottom: '1rem',
+              padding: '0.75rem 1rem',
+              background: '#fff',
+              borderRadius: 8,
+              border: '1px solid rgba(17,17,17,0.1)',
+            }}
+          >
             {uploadStatus}
           </div>
         )}
-        {reanalyzeMsg && (
-          <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', color: '#166534', fontSize: '0.9rem' }}>
-            {reanalyzeMsg}
-          </div>
-        )}
+
         {deleteError && (
-          <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b', fontSize: '0.9rem' }}>
+          <div
+            style={{
+              marginBottom: '1rem',
+              padding: '0.75rem 1rem',
+              background: '#fef2f2',
+              borderRadius: 8,
+              border: '1px solid #fecaca',
+              color: '#991b1b',
+            }}
+          >
             {deleteError}
           </div>
         )}
@@ -469,28 +450,44 @@ export default function Gallery() {
                   />
                 )}
 
-                {isVideoItem(item) && (
+                {item.place_name && (
                   <div
                     style={{
                       position: 'absolute',
                       bottom: 8,
-                      right: 8,
-                      color: '#fff',
+                      left: 8,
                       background: 'rgba(0,0,0,0.55)',
-                      backdropFilter: 'blur(4px)',
                       color: '#fff',
                       fontSize: '0.65rem',
                       fontWeight: 600,
                       padding: '2px 7px',
                       borderRadius: '20px',
-                      maxWidth: 'calc(100% - 12px)',
+                      maxWidth: 'calc(100% - 16px)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                    }}>
-                      📍 {photo.place_name}
-                    </div>
-                  )}
+                    }}
+                  >
+                    📍 {item.place_name}
+                  </div>
+                )}
+
+                {isVideoItem(item) && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 8,
+                      right: 8,
+                      color: '#fff',
+                      background: 'rgba(0,0,0,0.55)',
+                      borderRadius: 999,
+                      padding: '4px 8px',
+                      fontSize: 12,
+                    }}
+                  >
+                    VIDEO
+                  </div>
+                )}
 
                 {selectMode && (
                   <div
@@ -533,7 +530,7 @@ export default function Gallery() {
 
       {selectedItem && (
         <div
-          onClick={() => setSelectedIndex(null)}
+          onClick={closeLightbox}
           style={{
             position: 'fixed',
             inset: 0,
@@ -659,8 +656,8 @@ export default function Gallery() {
                     marginBottom: '1rem',
                   }}
                 >
-                  <div><strong>Date taken:</strong> {selectedItem.date_taken || 'N/A'}</div>
-                  <div><strong>Uploaded at:</strong> {selectedItem.uploaded_at || 'N/A'}</div>
+                  <div><strong>Date taken:</strong> {formatDate(selectedItem.date_taken)}</div>
+                  <div><strong>Uploaded at:</strong> {formatDate(selectedItem.uploaded_at)}</div>
                   <div><strong>Place:</strong> {selectedItem.place_name || 'N/A'}</div>
                   <div><strong>Camera make:</strong> {selectedItem.camera_make || 'N/A'}</div>
                   <div><strong>Camera model:</strong> {selectedItem.camera_model || 'N/A'}</div>
@@ -674,9 +671,25 @@ export default function Gallery() {
                 </div>
               )}
 
+              {isVideoItem(selectedItem) && (
+                <div
+                  style={{
+                    fontSize: '0.9rem',
+                    color: '#444',
+                    lineHeight: 1.7,
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <div><strong>Uploaded at:</strong> {formatDate(selectedItem.uploaded_at)}</div>
+                  <div><strong>Place:</strong> {selectedItem.place_name || 'N/A'}</div>
+                  <div><strong>Duration:</strong> {selectedItem.duration || 'N/A'}</div>
+                  <div><strong>File size:</strong> {selectedItem.file_size || 'N/A'}</div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                 <button
-                  onClick={() => setSelectedIndex(null)}
+                  onClick={closeLightbox}
                   style={{
                     padding: '0.6rem 1.25rem',
                     borderRadius: 8,
@@ -688,31 +701,10 @@ export default function Gallery() {
                   Close
                 </button>
               </div>
-
-              {/* → Next */}
-              <button
-                onClick={() => {
-                  if (selectedIndex === null || photos.length <= 1) return;
-                  const next = (selectedIndex + 1) % photos.length;
-                  const photo = photos[next];
-                  setSelected(photo);
-                  setSelectedIndex(next);
-                  setTimeout(() => tileRefs.current[photo.id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
-                }}
-                disabled={photos.length <= 1}
-                style={{ flexShrink: 0, width: 44, height: 44, borderRadius: '50%', background: '#faf8f4', border: '1.5px solid rgba(17,17,17,0.12)', color: '#111', fontSize: 22, cursor: photos.length <= 1 ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: photos.length <= 1 ? 0.2 : 1, boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}
-                onMouseEnter={e => { if (photos.length > 1) e.currentTarget.style.transform = 'scale(1.08)'; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; }}
-              >›</button>
-
             </div>
           </div>
-        )}
-      </main>
-
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+        </div>
+      )}
     </>
   );
 }
