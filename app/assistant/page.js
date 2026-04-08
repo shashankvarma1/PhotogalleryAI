@@ -6,24 +6,27 @@ import Sidebar from '../../components/Sidebar';
 import BottomNav from '../../components/BottomNav';
 
 const SUGGESTIONS = [
-  "What was I doing last summer?",
+  "What was I doing last October?",
   "Show me photos with my family",
   "Tell me my life story in chapters",
   "Give me a 2024 year in review",
-  "Find my best photos from Barcelona",
+  "Find my best photos for Instagram",
   "Who do I take the most photos with?",
   "Create an album of my recent trip",
   "Find duplicate photos",
+  "Write Instagram captions for my top photos",
+  "Show me photos from my birthday",
 ];
 
 // ── Photo grid rendered inside a chat bubble ──────────────────────────────────
 function PhotoGrid({ photos, onPhotoClick }) {
   if (!photos?.length) return null;
   const show = photos.slice(0, 12);
+  const cols = Math.min(show.length, 4);
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: `repeat(${Math.min(show.length, 4)}, 1fr)`,
+      gridTemplateColumns: `repeat(${cols}, 1fr)`,
       gap: 4, marginTop: 10, borderRadius: 10, overflow: 'hidden',
     }}>
       {show.map((p, i) => (
@@ -45,6 +48,14 @@ function PhotoGrid({ photos, onPhotoClick }) {
               background: 'rgba(0,0,0,0.6)', color: 'white',
               fontSize: 10, fontWeight: 700, borderRadius: 4, padding: '1px 5px',
             }}>{p.similarity_pct}%</div>
+          )}
+          {p.place_name && (
+            <div style={{
+              position: 'absolute', bottom: 4, left: 4,
+              background: 'rgba(0,0,0,0.55)', color: 'white',
+              fontSize: 9, borderRadius: 4, padding: '1px 5px',
+              maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>📍 {p.place_name}</div>
           )}
         </div>
       ))}
@@ -120,6 +131,9 @@ function TimelineView({ periods }) {
             <div style={{ fontSize: 11, color: 'rgba(17,17,17,0.4)' }}>
               {p.photo_count} photo{p.photo_count !== 1 ? 's' : ''}
             </div>
+            {p.mood && (
+              <div style={{ fontSize: 10, color: 'rgba(17,17,17,0.4)', marginTop: 2 }}>✨ {p.mood}</div>
+            )}
             {p.places?.[0] && (
               <div style={{ fontSize: 10, color: 'rgba(17,17,17,0.4)', marginTop: 2 }}>📍 {p.places[0]}</div>
             )}
@@ -167,21 +181,78 @@ function DuplicateGroups({ groups }) {
   );
 }
 
-// ── Render tool result into UI ────────────────────────────────────────────────
-function ToolResultView({ tool, result, onPhotoClick }) {
-  if (!result) return null;
+// ── Instagram best photos ─────────────────────────────────────────────────────
+function InstagramPicks({ result, onPhotoClick }) {
+  if (!result?.photos?.length) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <span style={{ fontSize: 14 }}>📸</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'rgba(17,17,17,0.5)', fontFamily: "'Syne', sans-serif", textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          Top {result.photos.length} picks
+          {result.vibe ? ` · ${result.vibe}` : ''}
+        </span>
+      </div>
+      <PhotoGrid photos={result.photos} onPhotoClick={onPhotoClick} />
+    </div>
+  );
+}
 
-  if (tool === 'search_photos' ) {
-    const photos = result.photos || [];
-    if (!photos.length) return null;
-    return <PhotoGrid photos={photos} onPhotoClick={onPhotoClick} />;
-  }
+// ── Caption cards ─────────────────────────────────────────────────────────────
+function CaptionCards({ result }) {
+  const [copied, setCopied] = useState(null);
+  if (!result?.captions?.length) return null;
 
-  if (tool === 'get_people_stats') {
-  if (result.photos?.length) {
+  const copy = (text, idx) => {
+    navigator.clipboard.writeText(text);
+    setCopied(idx);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const platformEmoji = { instagram: '📸', linkedin: '💼', twitter: '🐦', threads: '🧵' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+      {result.captions.map((c, i) => (
+        <div key={i} style={{
+          background: 'rgba(17,17,17,0.03)', border: '1px solid rgba(17,17,17,0.08)',
+          borderRadius: 12, overflow: 'hidden', display: 'flex', gap: 10,
+        }}>
+          {c.url && (
+            <img src={c.url} alt="" style={{ width: 64, height: 64, objectFit: 'cover', flexShrink: 0 }} />
+          )}
+          <div style={{ padding: '10px 10px 10px 0', flex: 1 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(17,17,17,0.4)', fontFamily: "'Syne', sans-serif", marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {platformEmoji[result.platform] || '📝'} {result.platform} caption
+            </div>
+            <div style={{ fontSize: 12, color: '#111', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+              {c.caption}
+            </div>
+            <button
+              onClick={() => copy(c.caption, i)}
+              style={{
+                marginTop: 8, padding: '4px 10px',
+                background: copied === i ? '#16a34a' : 'rgba(17,17,17,0.08)',
+                color: copied === i ? 'white' : 'rgba(17,17,17,0.6)',
+                border: 'none', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                fontFamily: "'Syne', sans-serif", cursor: 'pointer', transition: 'all 0.15s',
+              }}
+            >
+              {copied === i ? '✓ Copied!' : 'Copy'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── People stats ──────────────────────────────────────────────────────────────
+function PeopleStats({ result, onPhotoClick }) {
+  if (result?.photos?.length) {
     return <PhotoGrid photos={result.photos} onPhotoClick={onPhotoClick} />;
   }
-  if (result.people?.length) {
+  if (result?.people?.length) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 10 }}>
         {result.people.map((p, i) => (
@@ -190,7 +261,6 @@ function ToolResultView({ tool, result, onPhotoClick }) {
             border: '1px solid rgba(17,17,17,0.08)',
             borderRadius: 12, overflow: 'hidden',
           }}>
-            {/* Person header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px' }}>
               {p.photos?.[0]?.url && (
                 <img src={p.photos[0].url} alt="" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
@@ -201,7 +271,6 @@ function ToolResultView({ tool, result, onPhotoClick }) {
               </div>
               <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 20, color: 'rgba(17,17,17,0.1)' }}>#{i + 1}</div>
             </div>
-            {/* Photo strip */}
             {p.photos?.length > 0 && (
               <div style={{ display: 'flex', gap: 2, padding: '0 2px 2px' }}>
                 {p.photos.map((photo, j) => (
@@ -228,6 +297,29 @@ function ToolResultView({ tool, result, onPhotoClick }) {
   }
   return null;
 }
+
+// ── Render tool result into UI ────────────────────────────────────────────────
+function ToolResultView({ tool, result, onPhotoClick }) {
+  if (!result) return null;
+
+  if (tool === 'search_photos') {
+    const photos = result.photos || [];
+    if (!photos.length) return null;
+    return <PhotoGrid photos={photos} onPhotoClick={onPhotoClick} />;
+  }
+
+  if (tool === 'get_best_photos_for_instagram') {
+    return <InstagramPicks result={result} onPhotoClick={onPhotoClick} />;
+  }
+
+  if (tool === 'generate_captions') {
+    return <CaptionCards result={result} />;
+  }
+
+  if (tool === 'get_people_stats') {
+    return <PeopleStats result={result} onPhotoClick={onPhotoClick} />;
+  }
+
   if (tool === 'get_timeline') {
     return <TimelineView periods={result.periods} />;
   }
@@ -252,6 +344,49 @@ function ToolResultView({ tool, result, onPhotoClick }) {
       >
         Open album →
       </a>
+    );
+  }
+
+  if (tool === 'share_photos' && result.message) {
+    return (
+      <div style={{
+        marginTop: 8, padding: '8px 12px',
+        background: result.error ? 'rgba(220,38,38,0.06)' : 'rgba(22,163,74,0.06)',
+        border: `1px solid ${result.error ? 'rgba(220,38,38,0.2)' : 'rgba(22,163,74,0.2)'}`,
+        borderRadius: 8, fontSize: 12,
+        color: result.error ? '#dc2626' : '#16a34a',
+        fontFamily: "'Syne', sans-serif",
+      }}>
+        {result.error ? '✗ ' : '✓ '}{result.message || result.error}
+      </div>
+    );
+  }
+
+  if (tool === 'share_album' && result.message) {
+    return (
+      <div style={{
+        marginTop: 8, padding: '8px 12px',
+        background: 'rgba(22,163,74,0.06)',
+        border: '1px solid rgba(22,163,74,0.2)',
+        borderRadius: 8, fontSize: 12, color: '#16a34a',
+        fontFamily: "'Syne', sans-serif",
+      }}>
+        ✓ {result.message}
+      </div>
+    );
+  }
+
+  if (tool === 'delete_photos' && result.deleted !== undefined) {
+    return (
+      <div style={{
+        marginTop: 8, padding: '8px 12px',
+        background: 'rgba(220,38,38,0.06)',
+        border: '1px solid rgba(220,38,38,0.2)',
+        borderRadius: 8, fontSize: 12, color: '#dc2626',
+        fontFamily: "'Syne', sans-serif",
+      }}>
+        🗑 {result.message}
+      </div>
     );
   }
 
@@ -325,11 +460,10 @@ function Lightbox({ photo, onClose }) {
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 export default function AssistantPage() {
-  const [messages, setMessages] = useState([]); // { role, content, tool_results? }
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
-  const [pendingConfirm, setPendingConfirm] = useState(null); // for destructive actions
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -366,9 +500,8 @@ export default function AssistantPage() {
 
       if (!res.ok) throw new Error(data.error || 'Request failed');
 
-      // Replace thinking indicator with real response
       setMessages(prev => {
-        const withoutThinking = prev.slice(0, -1); // remove thinking bubble
+        const withoutThinking = prev.slice(0, -1);
         return [
           ...withoutThinking,
           {
@@ -436,7 +569,7 @@ export default function AssistantPage() {
                   Ask anything about your life
                 </h1>
                 <p style={{ fontFamily: "'Syne', sans-serif", fontSize: 13, color: 'rgba(17,17,17,0.4)', lineHeight: 1.6 }}>
-                  Your photos are a diary you never wrote. I can find them, tell your story, create albums, and more.
+                  Your photos are a diary you never wrote. I can find them, tell your story, create albums, suggest Instagram picks, and more.
                 </p>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -455,7 +588,6 @@ export default function AssistantPage() {
               </div>
             ))}
 
-            {/* Loading indicator (shown while waiting, before thinking bubble) */}
             {loading && messages[messages.length - 1]?.thinking && (
               <div style={{ display: 'flex', gap: 4, padding: '8px 0 16px', paddingLeft: 4 }}>
                 {[0, 1, 2].map(i => (
@@ -482,7 +614,7 @@ export default function AssistantPage() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask about your photos, life story, create albums…"
+              placeholder="Ask about your photos, life story, Instagram picks, create albums…"
               rows={1}
               style={{
                 flex: 1, padding: '12px 16px',

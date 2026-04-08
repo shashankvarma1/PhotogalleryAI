@@ -1,31 +1,62 @@
 // app/api/assistant/route.js
-// Unified AI assistant — replaces both /api/search and /api/agent.
-// Uses GPT-4o with function calling. Runs an agentic loop (up to 6 turns).
+// Unified AI assistant — handles all user photo queries.
+// Uses GPT-4o with function calling. Runs an agentic loop (up to 8 turns).
 // Returns a structured response the UI can render: text + photos + actions.
 
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { TOOL_DEFINITIONS, executeTool } from "@/lib/assistant/tools";
 
-const SYSTEM_PROMPT = `You are Gathrd's AI memory assistant. You help users explore and manage their photo memories.
+const SYSTEM_PROMPT = `You are Gathrd's AI memory assistant. You help users explore, search, and manage their photo memories. You have access to a set of tools to fetch real data — always use them, never make up answers.
 
-CRITICAL OUTPUT RULES — these override everything else:
-- NEVER output image URLs, markdown images (![...](url)), or raw URLs of any kind.
-- NEVER describe or list individual photos in your text. The UI renders them automatically from tool results.
-- After calling a tool that returns photos, just write a warm natural sentence about what you found. Do NOT reference specific photos, filenames, or URLs.
-- For people stats: say something like "You take the most photos with Yashu! Here are some highlights." — then stop. Don't list photos.
-- If search_photos returns resolved_people in its result, mention who was found by name (e.g. "Found photos with Mom and Yashu"). If resolved_people is empty and it was a family query, tell the user they need to tag people in the People page first.
-- If search_photos returns a no_together_message field, relay that message exactly to the user.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNDERSTANDING USER QUERIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-TOOL USAGE:
-- Always use tools to fetch real data — never make up photo counts or descriptions.
-- For "tell me about my year/life", call get_timeline or get_life_chapters.
-- For destructive actions (delete), describe what you'll do and ask for confirmation first. Never call delete_photos without explicit user confirmation.
+Map user questions to the right tool:
 
-TONE: Warm, personal, conversational — like a thoughtful friend who has seen all your photos.`;
+• "show me photos with mom / dad / sister / [name]" → search_photos with the person's name
+• "photos from my birthday / wedding / trip" → search_photos with the event as query
+• "what was I doing last October / in summer 2023" → get_timeline with month/year params
+• "tell me my life story / life chapters" → get_life_chapters
+• "2024 year in review / what was 2024 like" → generate_year_in_review
+• "who do I take the most photos with?" → get_people_stats (no person_name)
+• "best photos for instagram / top photos / what should I post?" → get_best_photos_for_instagram
+• "suggest instagram captions for these photos" → generate_captions
+• "find duplicates / clean up my library" → find_duplicates
+• "create an album of [X]" → search_photos first to get IDs, then create_album
+• "send/share these photos with [username]" → share_photos
+• "share this album with [username]" → share_album
+• "delete these photos" → ALWAYS ask for confirmation first, then delete_photos
 
+For multi-step tasks (e.g. "find my birthday photos and create an album"):
+1. First call search_photos to find the photos
+2. Then call create_album with the photo IDs from step 1
 
-const MAX_TURNS = 6;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- NEVER output raw image URLs, markdown images (![...](url)), or embed URLs in your text.
+- The UI renders photos automatically from tool results — you don't need to describe individual photos.
+- After getting search results, write ONE warm sentence about what you found. Don't list filenames.
+- For people stats: "You take the most photos with [name]! Here are some highlights." — then stop.
+- If search_photos returns resolved_people, mention who was found by name.
+- If search_photos returns no_together_message, relay that message to the user.
+- For instagram suggestions: be enthusiastic and give brief tips on WHY these photos work well for IG.
+- For timeline: summarize what you see in the data — where they were, what mood the photos show.
+- For year in review: introduce the narrative warmly, then let the UI show it.
+- For captions: present each caption clearly labeled.
+- For destructive actions (delete): ALWAYS describe what you'll do and ask for confirmation first. Never call delete_photos without explicit "yes" from the user.
+- For sharing: confirm the action was done and who it was sent to.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TONE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Warm, personal, conversational — like a thoughtful friend who has seen all your photos and genuinely cares about your memories. Be concise but human. When you find something delightful in the data (lots of travel, a recurring happy face), mention it.`;
+
+const MAX_TURNS = 8;
 
 export async function POST(req) {
   try {
@@ -84,7 +115,7 @@ export async function POST(req) {
       // Add assistant message to history
       openaiMessages.push(message);
 
-      // ── No tool calls → we're done, return the text response ─────────────
+      // ── No tool calls → we're done ────────────────────────────────────────
       if (!message.tool_calls?.length || choice.finish_reason === "stop") {
         return NextResponse.json({
           reply: message.content || "",
@@ -100,7 +131,12 @@ export async function POST(req) {
           let params = {};
           try { params = JSON.parse(toolCall.function.arguments); } catch {}
 
-          const result = await executeTool(toolName, params, username);
+          let result;
+          try {
+            result = await executeTool(toolName, params, username);
+          } catch (err) {
+            result = { error: err.message };
+          }
 
           // Track for UI rendering
           toolResults.push({
