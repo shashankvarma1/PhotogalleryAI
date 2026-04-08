@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
 import { embedText, toSqlVector } from "@/lib/hf";
+import { addPhotoToLocationAlbum } from "@/lib/locationAlbum";
 
 export async function PATCH(req, { params }) {
   const session = await auth();
@@ -40,5 +41,7 @@ export async function PATCH(req, { params }) {
     }
   }
 
+  // Auto-group into location album
+await addPhotoToLocationAlbum(parseInt(id), placeName.trim(), session.user.username);
   return NextResponse.json({ message: "Location updated" });
 }

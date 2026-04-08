@@ -1,34 +1,11 @@
 /* app/globals.css */
 
-/* ── Sidebar visibility ──────────────────────────────────────────────────── */
-/* Sidebar component itself handles positioning — this just controls the
-   main content offset so it doesn't sit under the sidebar on desktop */
-
-@media (min-width: 1024px) {
-  /* Push main content right on desktop to clear the 240px sidebar */
-  main {
-    margin-left: 240px !important;
-  }
+/* ── Sidebar offset ──────────────────────────────────────────────────────── */
+/* Sidebar is always visible as a 60px icon rail on all screen sizes.
+   Main content is always offset by 60px. */
+main {
+  margin-left: 60px !important;
 }
-
-@media (max-width: 1023px) {
-  /* On mobile/tablet: no left margin — sidebar is hidden */
-  main {
-    margin-left: 0 !important;
-  }
-}
-
-/* ── Sidebar hide/show ───────────────────────────────────────────────────── */
-/* The Sidebar component uses position:fixed and is always in the DOM.
-   Hide it on mobile via this rule so inline styles don't override */
-@media (max-width: 1023px) {
-  aside.sidebar {
-    display: none !important;
-  }
-}
-
-/* ── BottomNav ───────────────────────────────────────────────────────────── */
-/* BottomNav already has @media(min-width:1024px){display:none} built in */
 
 /* ── Global resets ───────────────────────────────────────────────────────── */
 *, *::before, *::after {
@@ -41,8 +18,23 @@
 ::-webkit-scrollbar-thumb { background: rgba(17,17,17,0.15); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(17,17,17,0.25); }
 
-/* ── Spin animation (used by gallery re-analyse button) ─────────────────── */
+/* ── Animations ──────────────────────────────────────────────────────────── */
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
 }
