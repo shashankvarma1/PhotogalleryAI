@@ -25,13 +25,19 @@ For EVERY user query that involves photos, people, places, dates, or memories �
 TOOL SELECTION
 ════════════════════════════════════════
 search_photos — primary tool for finding photos. Use structured params:
-  - person_name: use when user mentions a person's name (yashu, mom, dad, gautam, etc.)
+  - person_name: use when user mentions a person's name (yashu, mom, srihitha, etc.)
+  - query: use for the EVENT or TOPIC (birthday, beach, hiking, graduation, etc.)
   - emotion: happy/sad/excited/etc.
   - location: place name
   - date_year + date_month: for time-based queries
-  - query: for semantic/topic searches (beach, birthday, hiking)
+  CRITICAL — person + event queries: ALWAYS split them into SEPARATE params.
+    "srihitha's birthday photos"  → person_name:"srihitha", query:"birthday"
+    "yashu at the beach"          → person_name:"yashu", query:"beach"
+    "mom's graduation"            → person_name:"mom", query:"graduation"
+    "happy photos with gautam"    → person_name:"gautam", emotion:"happy"
+  NEVER merge them into a single query string like query:"srihitha birthday".
+  The person_name param triggers a face-tag JOIN; query drives semantic ranking.
   Combine freely: person_name + location, emotion + date_year, etc.
-
 get_people_stats — for "who do I take most photos with" or "show photos of [name]"
   Returns per-person photo strips. Always returns photos.
 
@@ -97,8 +103,8 @@ export async function POST(req) {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gpt-4o",
-          max_tokens: 1500,
+          model: "gpt-4o-mini",
+          max_tokens: 800,
           tools: TOOL_DEFINITIONS,
           tool_choice: "auto",
           messages: openaiMessages,
@@ -130,8 +136,11 @@ export async function POST(req) {
         try { params = JSON.parse(tc.function.arguments); } catch {}
 
         let result;
-        try { result = await executeTool(toolName, params, username); }
-        catch (err) { result = { error: err.message }; }
+try { result = await executeTool(toolName, params, username); }
+catch (err) { 
+  console.error("TOOL CRASH", toolName, params, err); 
+  result = { error: err.message }; 
+}
 
         toolResults.push({ tool: toolName, params, result });
         toolCallResults.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(result) });

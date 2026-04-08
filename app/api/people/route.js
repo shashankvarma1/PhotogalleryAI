@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
-import { embedText, toSqlVector } from "@/lib/hf";
+// import { embedText, toSqlVector } from "@/lib/hf";
 import { updateDescriptionWithPeople } from "@/lib/description";
 
 // ── Shared helper: re-embed a photo after its people tags change ─────────────
