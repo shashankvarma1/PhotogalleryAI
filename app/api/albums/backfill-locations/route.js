@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import pool from "@/lib/db";
-import { addPhotoToLocationAlbum } from "@/lib/locationAlbum";
+import { syncLocationAlbum } from "@/lib/locationAlbum";
 
 export async function GET() {
   try {
