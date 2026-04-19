@@ -9,24 +9,19 @@ import supabaseAdmin from "@/lib/supabaseAdmin";
 
 const ONE_YEAR = 60 * 60 * 24 * 365;
 
-// FIX: refresh a signed URL from storage_path — never use stored signed URLs
 async function refreshPhotoUrl(photo) {
   if (!photo) return null;
-  // If photo has a storage_path, get a fresh signed URL
   if (photo.storage_path) {
     try {
       const { data, error } = await supabaseAdmin.storage
         .from("photos")
         .createSignedUrl(photo.storage_path, ONE_YEAR);
       if (!error && data?.signedUrl) {
-        // Update the stored URL in background so it's fresh next time
-        pool.query("UPDATE photos SET url = $1 WHERE id = $2", [data.signedUrl, photo.id])
-          .catch(() => {});
+        pool.query("UPDATE photos SET url = $1 WHERE id = $2", [data.signedUrl, photo.id]).catch(() => {});
         return data.signedUrl;
       }
     } catch {}
   }
-  // Fall back to stored URL
   return photo.url || null;
 }
 
@@ -40,33 +35,28 @@ export async function GET() {
     await initDb();
     await initMemories();
 
-    const memCountRes = await pool.query(
-      "SELECT COUNT(*) FROM memories WHERE username = $1",
-      [username]
-    );
+    const memCountRes = await pool.query("SELECT COUNT(*) FROM memories WHERE username = $1", [username]);
     const memCount = parseInt(memCountRes.rows[0].count, 10);
 
     if (memCount === 0) {
       await generateMemoriesForUser(username);
     } else {
-      generateMemoriesForUser(username).catch(err =>
-        console.error("Background memory generation failed:", err)
-      );
+      generateMemoriesForUser(username).catch(err => console.error("Background memory generation failed:", err));
     }
 
-    // ── Fetch memories with fresh cover URLs ─────────────────────────────
+    // ── Fetch memories ────────────────────────────────────────────────────
     const memoriesRes = await pool.query(`
       SELECT m.id, m.title, m.subtitle, m.date_label, m.period_start, m.period_end,
              m.photo_count, m.dominant_mood, m.generated_at,
-             -- FIX: get fresh photo data instead of stored signed URL
+             -- FIX: use COALESCE(date_taken, uploaded_at) to match photos correctly
              p.id AS cover_photo_id, p.url AS cover_url, p.storage_path AS cover_storage_path
       FROM memories m
       LEFT JOIN LATERAL (
         SELECT ph.id, ph.url, ph.storage_path
         FROM photos ph
         WHERE ph.uploaded_by = $1
-          AND ph.uploaded_at >= m.period_start
-          AND ph.uploaded_at <= m.period_end + INTERVAL '1 day'
+          AND COALESCE(ph.date_taken, ph.uploaded_at) >= m.period_start
+          AND COALESCE(ph.date_taken, ph.uploaded_at) < m.period_end + INTERVAL '1 day'
         ORDER BY COALESCE(ph.date_taken, ph.uploaded_at) ASC
         LIMIT 1
       ) p ON true
@@ -75,7 +65,6 @@ export async function GET() {
       LIMIT 12
     `, [username]);
 
-    // Refresh cover URLs for memories
     const memories = await Promise.all(
       memoriesRes.rows.map(async (memory) => {
         const freshUrl = await refreshPhotoUrl({
@@ -98,7 +87,7 @@ export async function GET() {
       })
     );
 
-    // ── Fetch pinned albums with fresh cover URLs ─────────────────────────
+    // ── Pinned albums with fresh covers ───────────────────────────────────
     const pinnedRes = await pool.query(`
       SELECT
         albums.id, albums.name, albums.description, albums.pinned, albums.created_at,
@@ -127,7 +116,7 @@ export async function GET() {
       })
     );
 
-    // ── Fetch recent albums with fresh cover URLs ─────────────────────────
+    // ── Recent albums with fresh covers ───────────────────────────────────
     const recentAlbumsRes = await pool.query(`
       SELECT
         albums.id, albums.name, albums.description, albums.pinned, albums.created_at,
@@ -164,9 +153,7 @@ export async function GET() {
         (SELECT COUNT(*) FROM photos WHERE uploaded_by = $1) AS total_photos,
         (SELECT COUNT(*) FROM albums WHERE created_by = $1) AS total_albums,
         (SELECT COUNT(*) FROM memories WHERE username = $1) AS total_memories,
-        (SELECT COUNT(*) FROM photos
-         WHERE uploaded_by = $1
-           AND uploaded_at >= NOW() - INTERVAL '30 days') AS photos_this_month
+        (SELECT COUNT(*) FROM photos WHERE uploaded_by = $1 AND uploaded_at >= NOW() - INTERVAL '30 days') AS photos_this_month
     `, [username]);
 
     return NextResponse.json({
