@@ -34,10 +34,19 @@ async function getUniqueUsername(base) {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
-    Google({
-      clientId: process.env.AUTH_GOOGLE_ID,
-      clientSecret: process.env.AUTH_GOOGLE_SECRET,
-    }),
+    // TO THIS:
+Google({
+  clientId: process.env.AUTH_GOOGLE_ID,
+  clientSecret: process.env.AUTH_GOOGLE_SECRET,
+  checks: ["pkce"],
+  authorization: {
+    params: {
+      prompt: "consent",
+      access_type: "offline",
+      response_type: "code",
+    },
+  },
+}),
 
     Credentials({
       name: "Credentials",
